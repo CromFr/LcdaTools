@@ -13,7 +13,7 @@ static:
 
 		auto res = getopt(args, config.passThrough,
 			"config|c","LCDA config file to use\nDefault: ../config.json", &configPath,
-			"configovr","Override a value in config\nSyntax is `--configovr=foo=key`\nCan be specified multiple times", &configOverride,
+			"configovr","Override a value in config\nSyntax is `--configovr foo=key`\nCan be specified multiple times", &configOverride,
 			);
 		res.options = res.options[0..$-1];//remove help option
 		if(res.helpWanted)

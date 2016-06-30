@@ -12,6 +12,8 @@ import std.exception: assertThrown, assertNotThrown, enforce;
 import std.path;
 import std.algorithm;
 import std.array;
+import std.datetime: StopWatch;
+import std.math: sqrt;
 import nwn.gff;
 import nwn.twoda;
 
@@ -26,6 +28,7 @@ int main(string[] args){
 	string vaultOvr;
 	string tempOvr;
 	string[string] updateMapPaths;
+	bool noninteractive = false;
 
 	//Parse cmd line
 	try{
@@ -33,7 +36,8 @@ int main(string[] args){
 		res.options ~= getopt(args,
 			"vault", "Vault containing all character bic files to update.\nDefault: $path_nwn2docs/servervault", &vaultOvr,
 			"temp", "Temp folder for storing modified files installing them, and also backup files.\nDefault: $path_nwn2docs/itemupdater_tmp", &tempOvr,
-			required,"update", "Tag of the item with the updated blueprint.\nThe item blueprint can be a path to any UTI file or the resource name of an item on LcdaDev (without the .uti extension)\nCan be specified multiple times\nExample: --update=ITEMTAG=mynewitem", &updateMapPaths,
+			required,"update", "Tag of the item with the updated blueprint.\nThe item blueprint can be a path to any UTI file or the resource name of an item on LcdaDev (without the .uti extension)\nCan be specified multiple times\nExample: --update ITEMTAG=mynewitem", &updateMapPaths,
+			"noninteractive|y", "Do not prompt and update everything", &noninteractive,
 			).options;
 
 		if(res.helpWanted){
@@ -53,9 +57,19 @@ int main(string[] args){
 	immutable vault = vaultOvr !is null? vaultOvr : buildPath(LcdaConfig["path_nwn2docs"], "servervault");
 	enforce(vault.exists && vault.isDir, "Vault is not a directory/does not exist");
 	immutable temp = tempOvr !is null? tempOvr : buildPath(LcdaConfig["path_nwn2docs"], "itemupdater_tmp");
-	//TODO: display warning if temp has files in it
-	if(temp.exists)
+
+	if(temp.exists){
+		if(noninteractive==false && !temp.dirEntries(SpanMode.shallow).empty){
+			stderr.writeln("WARNING: '",temp,"' is not empty and may contain backups from previous item updates");
+			writeln();
+			write("'d' to delete content and continue: ");
+			stdout.flush();
+			if(readln()[0] != 'd')
+				return 1;
+		}
 		temp.rmdirRecurse;
+		writeln("Deleted '",temp,"'");
+	}
 	temp.mkdirRecurse;
 
 
@@ -70,11 +84,18 @@ int main(string[] args){
 	}
 
 	//Update servervault
+	writeln();
 	writeln("".center(80, '='));
 	writeln("  SERVERVAULT UPDATE  ".center(80, '|'));
 	writeln("".center(80, '='));
 	stdout.flush();
+
+	StopWatch bench;
+	bench.start;
 	foreach(charFile ; vault.dirEntries("*.bic", SpanMode.depth)){
+		import core.memory;
+		GC.collect;
+		GC.minimize;
 
 		bool charUpdated = false;
 		uint refund = 0;
@@ -113,10 +134,14 @@ int main(string[] args){
 
 						itemsToRemove[item.structType] = true;
 
-						//TODO: move item to inventory to avoid invalid character?
 						if(container["ItemList"].as!(GffType.List).length < 128){
 							//TODO: check if ok if inventory full
 							container["ItemList"].as!(GffType.List) ~= item.dup;
+						}
+						else{
+							stderr.writeln(
+								"WARNING: ",charFile," has '",item["Tag"].to!string,"' equipped and no room in inventory to unequip it.",
+								" The character may be refused on login for having an item too powerful for his level.",item.structType);
 						}
 					}
 				}
@@ -151,60 +176,63 @@ int main(string[] args){
 			//message
 			write(charPathRelative.leftJustify(35));
 			foreach(k,v ; updatedItemStats)
-				write(" ",v,"x",k);
+				write(" ",k,"(x",v,")");
 			if(refund>0)
 				write(" + Refund of ",refund,"gp");
 			writeln();
 			stdout.flush();
 		}
 	}
+	bench.stop;
 
 
 	writeln();
 	writeln("".center(80, '='));
-	writeln("  SUCCESS  ".center(80, '|'));
+	writeln("  INSTALLATION  ".center(80, '|'));
 	writeln("".center(80, '='));
-	writeln("All items have been updated.");
+	writeln("All items have been updated in ", bench.peek.msecs/1000.0, " seconds");
 	writeln("- new character files have been put in ", buildPath(temp, "updated_vault"));
 	writeln("- new items in database are pending for SQL commit");
 	writeln();
-	char ans;
-	do{
-		writeln("'y' to apply changes, 'n' to discard them: ");
-		stdout.flush();
-		ans = readln()[0];
-	} while(ans!='y' && ans !='n');
+	if(noninteractive==false){
 
-	if(ans=='y'){
-		//Copy char to new vault
-		void copyRecurse(string from, string to){
-			if(isDir(from)){
-				if(!to.exists){
-					mkdir(to);
-				}
+		char ans;
+		do{
+			write("'y' to apply changes, 'n' to discard them: ");
+			stdout.flush();
+			ans = readln()[0];
+		} while(ans!='y' && ans !='n');
 
-				if(to.isDir){
-					foreach(child ; from.dirEntries(SpanMode.shallow))
-						copyRecurse(child.name, buildPath(to, child.baseName));
+		if(ans=='y'){
+			//Copy char to new vault
+			void copyRecurse(string from, string to){
+				if(isDir(from)){
+					if(!to.exists){
+						mkdir(to);
+					}
+
+					if(to.isDir){
+						foreach(child ; from.dirEntries(SpanMode.shallow))
+							copyRecurse(child.name, buildPath(to, child.baseName));
+					}
+					else
+						throw new Exception("Cannot copy '"~from~"': '"~to~"' already exists and is not a directory");
 				}
-				else
-					throw new Exception("Cannot copy '"~from~"': '"~to~"' already exists and is not a directory");
+				else{
+					writeln("cp ",from," ",to);
+					stdout.flush();
+					copy(from, to);
+				}
 			}
-			else{
-				writeln("cp ",from," ",to);
-				stdout.flush();
-				copy(from, to);
-			}
+			copyRecurse(buildPath(temp, "updated_vault"), vault);
+			//SQL commit
+
+			return 0;
 		}
-		copyRecurse(buildPath(temp, "updated_vault"), vault);
-		//SQL commit
-	}
-	else{
-		//SQL rollback
 	}
 
 
-
+	//SQL rollback
 
 
 	return 0;
@@ -213,8 +241,6 @@ int main(string[] args){
 
 ///
 auto updateItem(in GffNode oldItem, in GffNode blueprint){
-	assertThrown!Error(oldItem["ItemList"], "item must not be a container");
-
 	with(GffType){
 		bool enchanted = false;
 		int enchantmentId;
@@ -234,9 +260,9 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint){
 		if("Repos_Index" in oldItem.as!Struct)
 			updatedItem.appendField(oldItem["Repos_Index"].dup);
 		updatedItem.appendField(oldItem["ActionList"].dup);
-		updatedItem.appendField(oldItem["DisplayName"].dup);//TODO: see value if copied from name
+		updatedItem.appendField(oldItem["DisplayName"].dup);//TODO: see value is copied from name
 		if("EffectList" in oldItem.as!Struct)
-			updatedItem.appendField(oldItem["EffectList"].dup);//TODO: Remove effects?
+			updatedItem.appendField(oldItem["EffectList"].dup);
 		if("LastName" in oldItem.as!Struct){
 			if("LastName" !in updatedItem.as!Struct)
 				updatedItem.appendField(GffNode(ExoLocString, "LastName", gffTypeToNative!ExoLocString(0, [0:""])));
@@ -249,9 +275,12 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint){
 		updatedItem.appendField(oldItem["ZPosition"].dup);
 
 		//Set instance properties that must persist through updates
-		updatedItem["Dropable"] = oldItem["Dropable"].dup;
+		//updatedItem["Dropable"] = oldItem["Dropable"].dup;
+		updatedItem["StackSize"] = oldItem["StackSize"].dup;
 		if("ItemList" in oldItem.as!Struct){
-			enforce("ItemList" in blueprint.as!Struct, "Updating an container (bag) by removing its container ability would remove all its content");
+			enforce(blueprint["BaseItem"].to!int == 66,
+				"Updating an container (bag) by removing its container ability would remove all its content"
+				~" ("~oldItem["Tag"].to!string~" => "~blueprint["TemplateResRef"].to!string~")");
 			//The item is a container (bag)
 			updatedItem["ItemList"] = oldItem["ItemList"].dup;
 		}
