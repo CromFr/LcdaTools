@@ -1,0 +1,680 @@
+import std.stdio;
+import std.getopt;
+	alias required = std.getopt.config.required;
+import std.string;
+import std.stdint;
+import std.conv;
+import std.file;
+alias write = std.stdio.write;
+alias writeFile = std.file.write;
+import std.typecons: Tuple;
+import std.exception: assertThrown, assertNotThrown, enforce;
+import std.path;
+import std.algorithm;
+import std.array;
+import nwn.gff;
+import nwn.twoda;
+
+import lcdaconfig;
+
+import lib_forge_epique;
+
+string CFG_TwoDAPath = `C:\Users\Crom\Documents\Neverwinter Nights 2\override\LcdaClientSrc\lcda2da.hak\`;
+TwoDA[string] twoDAs;
+
+int main(string[] args){
+	string vaultOvr;
+	string tempOvr;
+	string[string] updateMapPaths;
+
+	//Parse cmd line
+	try{
+		auto res = LcdaConfig.init(args);
+		res.options ~= getopt(args,
+			"vault", "Vault containing all character bic files to update.\nDefault: $path_nwn2docs/servervault", &vaultOvr,
+			"temp", "Temp folder for storing modified files installing them, and also backup files.\nDefault: $path_nwn2docs/itemupdater_tmp", &tempOvr,
+			required,"update", "Tag of the item with the updated blueprint.\nThe item blueprint can be a path to any UTI file or the resource name of an item on LcdaDev (without the .uti extension)\nCan be specified multiple times\nExample: --update=ITEMTAG=mynewitem", &updateMapPaths,
+			).options;
+
+		if(res.helpWanted){
+			improvedGetoptPrinter(
+				"Update items in bic files & sql db",
+				res.options);
+			return 0;
+		}
+	}
+	catch(GetOptException e){
+		stderr.writeln(e.msg);
+		stderr.writeln("Use --help for more information");
+		return 1;
+	}
+
+	//paths
+	immutable vault = vaultOvr !is null? vaultOvr : buildPath(LcdaConfig["path_nwn2docs"], "servervault");
+	enforce(vault.exists && vault.isDir, "Vault is not a directory/does not exist");
+	immutable temp = tempOvr !is null? tempOvr : buildPath(LcdaConfig["path_nwn2docs"], "itemupdater_tmp");
+	//TODO: display warning if temp has files in it
+	if(temp.exists)
+		temp.rmdirRecurse;
+	temp.mkdirRecurse;
+
+
+
+	//Parse blueprints
+	Gff[string] updateMap;
+	foreach(k, v ; updateMapPaths){
+		if(v.extension !is null)
+			updateMap[k] = new Gff(v);
+		else
+			updateMap[k] = new Gff(buildPath(LcdaConfig["path_lcdadev"], v~".uti"));
+	}
+
+	//Update servervault
+	writeln("".center(80, '='));
+	writeln("  SERVERVAULT UPDATE  ".center(80, '|'));
+	writeln("".center(80, '='));
+	stdout.flush();
+	foreach(charFile ; vault.dirEntries("*.bic", SpanMode.depth)){
+
+		bool charUpdated = false;
+		uint refund = 0;
+		int[string] updatedItemStats;
+
+		void updateSingleItem(ref GffNode item){
+			immutable tag = item["Tag"].to!string;
+			assert(tag in updateMap);
+
+			if(auto cnt = tag in updatedItemStats)
+				(*cnt)++;
+			else
+				updatedItemStats[tag] = 1;
+
+			charUpdated = true;
+			auto update = item.updateItem(updateMap[tag]);
+
+			refund += update.refund;
+			item = update.item;
+		}
+
+		void updateInventory(ref GffNode container){
+			assert("ItemList" in container.as!(GffType.Struct));
+
+			foreach(ref item ; container["ItemList"].as!(GffType.List)){
+				if(item["Tag"].to!string in updateMap){
+					updateSingleItem(item);
+				}
+			}
+
+			if("Equip_ItemList" in container.as!(GffType.Struct)){
+				bool[size_t] itemsToRemove;
+				foreach(ref item ; container["Equip_ItemList"].as!(GffType.List)){
+					if(item["Tag"].to!string in updateMap){
+						updateSingleItem(item);
+
+						itemsToRemove[item.structType] = true;
+
+						//TODO: move item to inventory to avoid invalid character?
+						if(container["ItemList"].as!(GffType.List).length < 128){
+							//TODO: check if ok if inventory full
+							container["ItemList"].as!(GffType.List) ~= item.dup;
+						}
+					}
+				}
+
+				container["Equip_ItemList"].as!(GffType.List).remove!(a=>(a.structType in itemsToRemove) !is null);
+
+
+			}
+		}
+
+		auto character = new Gff(charFile);
+		updateInventory(character);
+
+		if(charUpdated){
+			immutable charPathRelative = charFile.relativePath(vault);
+
+			//Apply refund
+			character["Gold"].as!(GffType.DWord) += refund;
+
+			//copy backup
+			auto backupFile = buildPath(temp, "backup_vault", charPathRelative);
+			if(!buildNormalizedPath(backupFile, "..").exists)
+				buildNormalizedPath(backupFile, "..").mkdirRecurse;
+			charFile.copy(backupFile);
+
+			//serialize current
+			auto tmpFile = buildPath(temp, "updated_vault", charPathRelative);
+			if(!buildNormalizedPath(tmpFile, "..").exists)
+				buildNormalizedPath(tmpFile, "..").mkdirRecurse;
+			tmpFile.writeFile(character.serialize);
+
+			//message
+			write(charPathRelative.leftJustify(35));
+			foreach(k,v ; updatedItemStats)
+				write(" ",v,"x",k);
+			if(refund>0)
+				write(" + Refund of ",refund,"gp");
+			writeln();
+			stdout.flush();
+		}
+	}
+
+
+	writeln();
+	writeln("".center(80, '='));
+	writeln("  SUCCESS  ".center(80, '|'));
+	writeln("".center(80, '='));
+	writeln("All items have been updated.");
+	writeln("- new character files have been put in ", buildPath(temp, "updated_vault"));
+	writeln("- new items in database are pending for SQL commit");
+	writeln();
+	char ans;
+	do{
+		writeln("'y' to apply changes, 'n' to discard them: ");
+		stdout.flush();
+		ans = readln()[0];
+	} while(ans!='y' && ans !='n');
+
+	if(ans=='y'){
+		//Copy char to new vault
+		void copyRecurse(string from, string to){
+			if(isDir(from)){
+				if(!to.exists){
+					mkdir(to);
+				}
+
+				if(to.isDir){
+					foreach(child ; from.dirEntries(SpanMode.shallow))
+						copyRecurse(child.name, buildPath(to, child.baseName));
+				}
+				else
+					throw new Exception("Cannot copy '"~from~"': '"~to~"' already exists and is not a directory");
+			}
+			else{
+				writeln("cp ",from," ",to);
+				stdout.flush();
+				copy(from, to);
+			}
+		}
+		copyRecurse(buildPath(temp, "updated_vault"), vault);
+		//SQL commit
+	}
+	else{
+		//SQL rollback
+	}
+
+
+
+
+
+	return 0;
+}
+
+
+///
+auto updateItem(in GffNode oldItem, in GffNode blueprint){
+	assertThrown!Error(oldItem["ItemList"], "item must not be a container");
+
+	with(GffType){
+		bool enchanted = false;
+		int enchantmentId;
+
+		GffNode updatedItem = blueprint.dup;
+		updatedItem.structType = 0;
+
+		//Remove blueprint props
+		updatedItem.as!Struct.remove("Comment");
+		updatedItem.as!Struct.remove("Classification");
+		updatedItem.as!Struct.remove("ItemCastsShadow");
+		updatedItem.as!Struct.remove("ItemRcvShadow");
+		updatedItem.as!Struct.remove("UVScroll");
+
+		//Add instance & inventory props
+		updatedItem.appendField(oldItem["ObjectId"].dup);
+		if("Repos_Index" in oldItem.as!Struct)
+			updatedItem.appendField(oldItem["Repos_Index"].dup);
+		updatedItem.appendField(oldItem["ActionList"].dup);
+		updatedItem.appendField(oldItem["DisplayName"].dup);//TODO: see value if copied from name
+		if("EffectList" in oldItem.as!Struct)
+			updatedItem.appendField(oldItem["EffectList"].dup);//TODO: Remove effects?
+		if("LastName" in oldItem.as!Struct){
+			if("LastName" !in updatedItem.as!Struct)
+				updatedItem.appendField(GffNode(ExoLocString, "LastName", gffTypeToNative!ExoLocString(0, [0:""])));
+		}
+		updatedItem.appendField(oldItem["XOrientation"].dup);
+		updatedItem.appendField(oldItem["XPosition"].dup);
+		updatedItem.appendField(oldItem["YOrientation"].dup);
+		updatedItem.appendField(oldItem["YPosition"].dup);
+		updatedItem.appendField(oldItem["ZOrientation"].dup);
+		updatedItem.appendField(oldItem["ZPosition"].dup);
+
+		//Set instance properties that must persist through updates
+		updatedItem["Dropable"] = oldItem["Dropable"].dup;
+		if("ItemList" in oldItem.as!Struct){
+			enforce("ItemList" in blueprint.as!Struct, "Updating an container (bag) by removing its container ability would remove all its content");
+			//The item is a container (bag)
+			updatedItem["ItemList"] = oldItem["ItemList"].dup;
+		}
+
+		//Fix nwn2 oddities
+		updatedItem["ArmorRulesType"] = GffNode(Int, "ArmorRulesType", blueprint["ArmorRulesType"].as!Byte);
+		updatedItem["Cost"].as!DWord = 0;
+		foreach(ref prop ; updatedItem["PropertiesList"].as!List){
+			prop.as!Struct.remove("Param2");
+			prop.as!Struct.remove("Param2Value");
+			prop["UsesPerDay"] = GffNode(Byte, "UsesPerDay", 255);
+			prop["Useable"] = GffNode(Byte, "Useable", 1);
+		}
+
+
+
+		//Copy local variables
+		//  rule: override oldItem vars with blueprint vars
+		size_t[string] varsInBlueprint;
+		foreach(i, ref var ; blueprint["VarTable"].as!List)
+			varsInBlueprint[var["Name"].as!ExoString] = i;
+
+		foreach(ref varNode ; oldItem["VarTable"].as!List){
+			//Append oldItem var if not in blueprint
+			if(varNode.label !in varsInBlueprint){
+				immutable name = varNode["Name"].to!string;
+				if(name=="DEJA_ENCHANTE")
+					enchanted     = varNode["Value"].to!bool;
+				else if(name=="X2_LAST_PROPERTY")
+					enchantmentId = varNode["Value"].as!Int;
+				else
+					updatedItem["VarTable"].as!List ~= varNode.dup;
+			}
+		}
+
+		//Enchantment
+		int refund = 0;
+		if(enchanted){
+			//Refund enchantment
+			refund = PrixDuService(enchantmentId);
+			assert(refund != 0);
+		}
+
+		return Tuple!(GffNode,"item", int,"refund")(updatedItem, refund);
+	}
+}
+
+unittest{
+	with(GffType){
+		void cmpItems(GffType TYPE=Struct)(in GffNode lhs, in GffNode rhs) if(TYPE==Struct || TYPE==List){
+			assert(lhs.type==TYPE && rhs.type==TYPE, "GffNode type mismatch");
+			assert(lhs.as!TYPE.length == rhs.as!TYPE.length, "children length mismatch");
+
+			static if(TYPE==Struct){
+				foreach(ref lhskv ; lhs.as!Struct.byKeyValue){
+					auto rhsv = lhskv.key in rhs.as!Struct;
+					assert(rhsv, "Key '"~lhskv.key~"' is in 'lhs' but not in 'rhs'");
+
+					assert(lhskv.key == lhskv.value.label);
+					assert(lhskv.value.label == lhskv.key);
+					assert(rhsv.label == lhskv.key);
+
+					if(lhskv.key=="LocalizedName") continue;//May change for practical reasons
+					if(lhskv.key=="Tint") continue;//Tint has a bug where color2 is automatically changed to red by the server
+					if(lhskv.key=="LastName") continue;//we dont care
+
+					if(lhskv.value.type == Struct){
+						cmpItems!Struct(lhskv.value, *rhsv);
+					}
+					else if(lhskv.value.type == List){
+						cmpItems!List(lhskv.value, *rhsv);
+					}
+					else{
+						assert(rhsv.toPrettyString == lhskv.value.toPrettyString,
+							"Value mismatch on key '"~lhskv.key~"': "~lhskv.value.toPrettyString~" => "~rhsv.toPrettyString);
+					}
+				}
+			}
+			else static if(TYPE==List){
+				foreach(i, ref lhsv ; lhs.as!List){
+					cmpItems!Struct(lhsv, rhs.as!List[i]);
+				}
+			}
+		}
+
+
+		auto character = new Gff("unittests/aaadebug.bic");
+		//import std.file: writeFile=write;
+		//foreach(i ; 0..6){
+		//	("unittests/instance-"~character["ItemList"][i]["LocalizedName"].to!string~".json").writeFile(character["ItemList"][i].toJson.toString);
+		//	("unittests/instance-"~character["ItemList"][i]["LocalizedName"].to!string~".pretty").writeFile(character["ItemList"][i].toPrettyString);
+		//}
+		//"unittests/blueprint-hacheavatardesglaces--ORIGINAL.UTI.pretty".writeFile(
+		//	new Gff("unittests/blueprint-hacheavatardesglaces--ORIGINAL.UTI").toPrettyString);
+
+		auto bpOriginal = new Gff("unittests/blueprint-hacheavatardesglaces--ORIGINAL.UTI");
+		auto bpBuffed = new Gff("unittests/blueprint-hacheavatardesglaces--ORIGINAL+2ALT.UTI");
+
+		auto from = character["ItemList"][0];
+		auto to = character["ItemList"][0].updateItem(bpOriginal).item;
+
+		cmpItems(from, to);
+
+
+		//import std.algorithm: sort, each;
+		//writeln("==================================== ORIGINAL ITEM");
+		//from.as!Struct.byKeyValue.dup.sort!"a.key < b.key".each!((a){writeln(a.key, "=", a.value.to!string, a.key in to.as!Struct? "" : "     <<<<<<<<<<<<<<<<");});
+		//writeln("==================================== UPDATED ITEM");
+		//to.as!Struct.byKeyValue.dup.sort!"a.key < b.key".each!((a){writeln(a.key, "=", a.value.to!string, a.key in from.as!Struct? "" : "     <<<<<<<<<<<<<<<<");});
+
+		//to.toPrettyString.writeln();
+
+
+
+
+	}
+
+}
+
+
+version(none)//<------------------ DISABLED
+struct ItemProperty{
+	this(int enchantType){
+		import nwnconstants;
+		root = GffNode(GffType.Struct);
+		switch(enchantType){
+			case 0: .. case 13:                                     buildUsing2DA(16, IP_CONST_DAMAGEBONUS_1d6, enchantType); break;//Checked vs game
+			case IP_CONST_WS_ENHANCEMENT_BONUS:                     buildUsing2DA(6, 1); break;
+			case IP_CONST_WS_HASTE:                                 buildUsing2DA(35); break;//Checked vs game
+			case IP_CONST_WS_KEEN:                                  buildUsing2DA(43); break;
+			case IP_CONST_WS_TRUESEEING:                            buildUsing2DA(71); break;
+			case IP_CONST_WS_SPELLRESISTANCE:                       buildUsing2DA(39, 10); break;//TODO: add to item
+			case IP_CONST_WS_REGENERATION:                          buildUsing2DA(51, 2); break;//Checked vs game
+			case IP_CONST_WS_MIGHTY_5:                              buildUsing2DA(); break;
+			case IP_CONST_WS_MIGHTY_10:                             buildUsing2DA(); break;
+			case IP_CONST_WS_UNLIMITED_3:                           buildUsing2DA(); break;
+			case IP_CONST_WS_ARMOR_BONUS_CA2:                       buildUsing2DA(1, 2); break;
+			case IP_CONST_WS_ARMOR_FREEACTION:                      buildUsing2DA(); break;
+			case IP_CONST_WS_ARMOR_STRENGTH_BONUS2:                 buildUsing2DA(); break;
+			case IP_CONST_WS_ARMOR_DEXTERITY_BONUS2:                buildUsing2DA(); break;
+			case IP_CONST_WS_ARMOR_CONSTITUTION_BONUS2:             buildUsing2DA(); break;
+			case IP_CONST_WS_ARMOR_INTELLIGENCE_BONUS2:             buildUsing2DA(); break;
+			case IP_CONST_WS_ARMOR_WISDOM_BONUS2:                   buildUsing2DA(); break;
+			case IP_CONST_WS_ARMOR_CHARISMA_BONUS2:                 buildUsing2DA(); break;
+			case IP_CONST_WS_SHIELD_REGENERATION1:                  buildUsing2DA(); break;
+			case IP_CONST_WS_SHIELD_SPELLRESISTANCE10:              buildUsing2DA(); break;
+			case IP_CONST_WS_SHIELD_BONUS_VIG_PLUS7:                buildUsing2DA(); break;
+			case IP_CONST_WS_SHIELD_BONUS_REF_PLUS7:                buildUsing2DA(); break;
+			case IP_CONST_WS_SHIELD_BONUS_VOL_PLUS7:                buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_ACID:           buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_BLUDGEONING:    buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_COLD:           buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_DIVINE:         buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_ELECTRICAL:     buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_FIRE:           buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_MAGICAL:        buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_NEGATIVE:       buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_PIERCING:       buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_POSITIVE:       buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_SLASHING:       buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_SONIC:          buildUsing2DA(); break;
+			case IP_CONST_WS_RING_FREEACTION:                       buildUsing2DA(); break;
+			case IP_CONST_WS_RING_IMMUNE_DEATH:                     buildUsing2DA(); break;
+			case IP_CONST_WS_RING_IMMUNE_TERROR:                    buildUsing2DA(); break;
+			case IP_CONST_WS_RING_IMMUNE_ABSORBTION:                buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_APPRAISE_BONUS15:         buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_BLUFF_BONUS15:            buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_CONCENTRATION_BONUS15:    buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_CRAFT_ARMOR_BONUS15:      buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_CRAFT_TRAP_BONUS15:       buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_CRAFT_WEAPON_BONUS15:     buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_DISABLE_TRAP_BONUS15:     buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_DISCIPLINE_BONUS15:       buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_HEAL_BONUS15:             buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_HIDE_BONUS15:             buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_INTIMIDATE_BONUS15:       buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_LISTEN_BONUS15:           buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_LORE_BONUS15:             buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_MOVE_SILENTLY_BONUS15:    buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_OPEN_LOCK_BONUS15:        buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_PARRY_BONUS15:            buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_PERFORM_BONUS15:          buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_PERSUADE_BONUS15:         buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_PICK_POCKET_BONUS15:      buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_SEARCH_BONUS15:           buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_SET_TRAP_BONUS15:         buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_SPELLCRAFT_BONUS15:       buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_SPOT_BONUS15:             buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_TAUNT_BONUS15:            buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_TUMBLE_BONUS15:           buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_USE_MAGIC_DEVICE_BONUS15: buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_DIPLOMACY_BONUS15:        buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_CRAFT_ALCHEMY_BONUS15:    buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_SLEIGHT_OF_HAND_BONUS15:  buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_SKILL_SURVIVAL_BONUS15:         buildUsing2DA(); break;
+			case IP_CONST_WS_BOOTS_DARKVISION:                      buildUsing2DA(); break;
+			case IP_CONST_WS_BOOTS_REGENERATION1:                   buildUsing2DA(); break;
+			case IP_CONST_WS_CLOAK_PARADE_BONUS2:                   buildUsing2DA(); break;
+			case IP_CONST_WS_BRACERS_BELT_CA_VS_BLUDGEONING_BONUS5: buildUsing2DA(); break;
+			case IP_CONST_WS_BRACERS_BELT_CA_VS_PIERCING_BONUS5:    buildUsing2DA(); break;
+			case IP_CONST_WS_BRACERS_BELT_CA_VS_SLASHING_BONUS5:    buildUsing2DA(); break;
+			case IP_CONST_WS_BRACERS_BELT_CONSTITUTION_BONUS2:      buildUsing2DA(); break;
+			case IP_CONST_WS_BRACERS_BELT_WISDOM_BONUS2:            buildUsing2DA(); break;
+			case IP_CONST_WS_BRACERS_BELT_INTELLIGENCE_BONUS2:      buildUsing2DA(); break;
+			case IP_CONST_WS_BRACERS_BELT_STRENGTH_BONUS2:          buildUsing2DA(); break;
+			case IP_CONST_WS_BRACERS_BELT_DEXTERITY_BONUS2:         buildUsing2DA(); break;
+			case IP_CONST_WS_BRACERS_BELT_CHARISMA_BONUS2:          buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_CONSTITUTION_BONUS2:              buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_WISDOM_BONUS2:                    buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_INTELLIGENCE_BONUS2:              buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_STRENGTH_BONUS2:                  buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_DEXTERITY_BONUS2:                 buildUsing2DA(); break;
+			case IP_CONST_WS_HELM_CHARISMA_BONUS2:                  buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_CONSTITUTION_BONUS2:            buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_WISDOM_BONUS2:                  buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_INTELLIGENCE_BONUS2:            buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_STRENGTH_BONUS2:                buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_DEXTERITY_BONUS2:               buildUsing2DA(); break;
+			case IP_CONST_WS_AMULET_CHARISMA_BONUS2:                buildUsing2DA(); break;
+			case IP_CONST_WS_RING_CONSTITUTION_BONUS2:              buildUsing2DA(); break;
+			case IP_CONST_WS_RING_WISDOM_BONUS2:                    buildUsing2DA(); break;
+			case IP_CONST_WS_RING_INTELLIGENCE_BONUS2:              buildUsing2DA(); break;
+			case IP_CONST_WS_RING_STRENGTH_BONUS2:                  buildUsing2DA(); break;
+			case IP_CONST_WS_RING_DEXTERITY_BONUS2:                 buildUsing2DA(); break;
+			case IP_CONST_WS_RING_CHARISMA_BONUS2:                  buildUsing2DA(); break;
+			case IP_CONST_WS_BOOTS_CONSTITUTION_BONUS2:             buildUsing2DA(); break;
+			case IP_CONST_WS_BOOTS_WISDOM_BONUS2:                   buildUsing2DA(); break;
+			case IP_CONST_WS_BOOTS_INTELLIGENCE_BONUS2:             buildUsing2DA(); break;
+			case IP_CONST_WS_BOOTS_STRENGTH_BONUS2:                 buildUsing2DA(); break;
+			case IP_CONST_WS_BOOTS_DEXTERITY_BONUS2:                buildUsing2DA(); break;
+			case IP_CONST_WS_BOOTS_CHARISMA_BONUS2:                 buildUsing2DA(); break;
+			case IP_CONST_WS_CLOAK_CONSTITUTION_BONUS2:             buildUsing2DA(); break;
+			case IP_CONST_WS_CLOAK_WISDOM_BONUS2:                   buildUsing2DA(); break;
+			case IP_CONST_WS_CLOAK_INTELLIGENCE_BONUS2:             buildUsing2DA(); break;
+			case IP_CONST_WS_CLOAK_STRENGTH_BONUS2:                 buildUsing2DA(); break;
+			case IP_CONST_WS_CLOAK_DEXTERITY_BONUS2:                buildUsing2DA(); break;
+			case IP_CONST_WS_CLOAK_CHARISMA_BONUS2:                 buildUsing2DA(); break;
+			case IP_CONST_WS_SHIELD_CONSTITUTION_BONUS2:            buildUsing2DA(); break;
+			case IP_CONST_WS_SHIELD_WISDOM_BONUS2:                  buildUsing2DA(); break;
+			case IP_CONST_WS_SHIELD_INTELLIGENCE_BONUS2:            buildUsing2DA(); break;
+			case IP_CONST_WS_SHIELD_STRENGTH_BONUS2:                buildUsing2DA(); break;
+			case IP_CONST_WS_SHIELD_DEXTERITY_BONUS2:               buildUsing2DA(); break;
+			case IP_CONST_WS_SHIELD_CHARISMA_BONUS2:                buildUsing2DA(); break;
+			default: throw new Exception("Unknown enchantType");
+		}
+	}
+
+
+	alias root this;
+	GffNode root;
+
+private:
+
+	/++
+		property: id of the property
+		value: index in iprp_*cost.2da (corresponding to CostValue node)
+
+		Builds a GFF with the following nodes:
+			PropertyName: idx in "itempropdef.2da"
+			Subtype     : idx in itempropdef[PropertyName]["SubTypeResRef"]~".2da"
+			CostTable   : idx in "iprp_costtable.2da". Also CostTableResRef column of itempropdef.2da
+			CostValue   : idx in iprp_costtable[CostTable]["Name"]~".2da"
+			Param1      : idx in "iprp_paramtable.2da". ubyte.max if no params
+			Param1Value : idx in iprp_paramtable[Param1]["TableResRef"]~".2da"
+			ChanceAppear: always 100
+			UsesPerDay  : ??? =255
+			Useable     : ??? =1
+	+/
+	void buildUsing2DA(uint32_t property, uint32_t value=uint16_t.max, uint32_t subType=uint16_t.max, uint8_t param1Value=uint8_t.max){
+		appendField(GffNode(GffType.Word, "PropertyName", property));
+
+		if("itempropdef" in twoDAs)
+			twoDAs["itempropdef"] = new TwoDA(buildPath(CFG_TwoDAPath,"itempropdef.2da"));
+
+		immutable subTypeTable = twoDAs["itempropdef"].get("SubTypeResRef", property);
+
+		appendField(GffNode(GffType.Word, "Subtype", subTypeTable !is null? subType : ushort.max));
+
+		string costTableResRef = twoDAs["itempropdef"].get("CostTableResRef", property);
+		appendField(GffNode(GffType.Byte, "CostTable", costTableResRef !is null? costTableResRef.to!ubyte : ubyte.max));
+		appendField(GffNode(GffType.Word, "CostValue", value));
+
+
+		string paramTableResRef = twoDAs["itempropdef"].get("Param1ResRef", property);
+		if(paramTableResRef !is null){
+			appendField(GffNode(GffType.Byte, "Param1", paramTableResRef.to!ubyte));
+			appendField(GffNode(GffType.Byte, "Param1Value", param1Value));
+		}
+		else{
+			appendField(GffNode(GffType.Byte, "Param1", -1));
+			appendField(GffNode(GffType.Byte, "Param1Value", -1));
+		}
+
+		appendField(GffNode(GffType.Byte, "ChanceAppear", 100));
+		appendField(GffNode(GffType.Byte, "UsesPerDay",   255));
+		appendField(GffNode(GffType.Byte, "Useable",      1));
+	}
+
+
+	uint getPropertyId(uint enchantType){
+		//Indices are found in itempropdef.2da
+		switch(enchantType){
+			case 0: .. case 13:                                     return 16;
+			case IP_CONST_WS_ENHANCEMENT_BONUS:                     return  6;
+			case IP_CONST_WS_HASTE:                                 return 35;
+			case IP_CONST_WS_KEEN:                                  return 43;
+			case IP_CONST_WS_TRUESEEING:                            return 71;
+			case IP_CONST_WS_SPELLRESISTANCE:                       return 39;
+			case IP_CONST_WS_REGENERATION:                          return 51;
+			case IP_CONST_WS_MIGHTY_5:                              return 45;
+			case IP_CONST_WS_MIGHTY_10:                             return 45;
+			case IP_CONST_WS_UNLIMITED_3:                           return 61;
+			case IP_CONST_WS_ARMOR_BONUS_CA2:                       return  1;
+			case IP_CONST_WS_ARMOR_FREEACTION:                      return 75;
+			case IP_CONST_WS_ARMOR_STRENGTH_BONUS2:                 return  0;
+			case IP_CONST_WS_ARMOR_DEXTERITY_BONUS2:                return  0;
+			case IP_CONST_WS_ARMOR_CONSTITUTION_BONUS2:             return  0;
+			case IP_CONST_WS_ARMOR_INTELLIGENCE_BONUS2:             return  0;
+			case IP_CONST_WS_ARMOR_WISDOM_BONUS2:                   return  0;
+			case IP_CONST_WS_ARMOR_CHARISMA_BONUS2:                 return  0;
+			case IP_CONST_WS_SHIELD_REGENERATION1:                  return 51;
+			case IP_CONST_WS_SHIELD_SPELLRESISTANCE10:              return 39;
+			case IP_CONST_WS_SHIELD_BONUS_VIG_PLUS7:                return 40;
+			case IP_CONST_WS_SHIELD_BONUS_REF_PLUS7:                return 40;
+			case IP_CONST_WS_SHIELD_BONUS_VOL_PLUS7:                return 40;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_ACID:           return 23;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_BLUDGEONING:    return 23;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_COLD:           return 23;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_DIVINE:         return 23;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_ELECTRICAL:     return 23;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_FIRE:           return 23;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_MAGICAL:        return 23;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_NEGATIVE:       return 23;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_PIERCING:       return 23;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_POSITIVE:       return 23;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_SLASHING:       return 23;
+			case IP_CONST_WS_HELM_DAMAGERESISTANCE5_SONIC:          return 23;
+			case IP_CONST_WS_RING_FREEACTION:                       return 75;
+			case IP_CONST_WS_RING_IMMUNE_DEATH:                     return 37;
+			case IP_CONST_WS_RING_IMMUNE_TERROR:                    return 37;
+			case IP_CONST_WS_RING_IMMUNE_ABSORBTION:                return 37;
+			case IP_CONST_WS_AMULET_SKILL_APPRAISE_BONUS15:         return 52;
+			case IP_CONST_WS_AMULET_SKILL_BLUFF_BONUS15:            return 52;
+			case IP_CONST_WS_AMULET_SKILL_CONCENTRATION_BONUS15:    return 52;
+			case IP_CONST_WS_AMULET_SKILL_CRAFT_ARMOR_BONUS15:      return 52;
+			case IP_CONST_WS_AMULET_SKILL_CRAFT_TRAP_BONUS15:       return 52;
+			case IP_CONST_WS_AMULET_SKILL_CRAFT_WEAPON_BONUS15:     return 52;
+			case IP_CONST_WS_AMULET_SKILL_DISABLE_TRAP_BONUS15:     return 52;
+			case IP_CONST_WS_AMULET_SKILL_DISCIPLINE_BONUS15:       return 52;
+			case IP_CONST_WS_AMULET_SKILL_HEAL_BONUS15:             return 52;
+			case IP_CONST_WS_AMULET_SKILL_HIDE_BONUS15:             return 52;
+			case IP_CONST_WS_AMULET_SKILL_INTIMIDATE_BONUS15:       return 52;
+			case IP_CONST_WS_AMULET_SKILL_LISTEN_BONUS15:           return 52;
+			case IP_CONST_WS_AMULET_SKILL_LORE_BONUS15:             return 52;
+			case IP_CONST_WS_AMULET_SKILL_MOVE_SILENTLY_BONUS15:    return 52;
+			case IP_CONST_WS_AMULET_SKILL_OPEN_LOCK_BONUS15:        return 52;
+			case IP_CONST_WS_AMULET_SKILL_PARRY_BONUS15:            return 52;
+			case IP_CONST_WS_AMULET_SKILL_PERFORM_BONUS15:          return 52;
+			case IP_CONST_WS_AMULET_SKILL_PERSUADE_BONUS15:         return 52;
+			case IP_CONST_WS_AMULET_SKILL_PICK_POCKET_BONUS15:      return 52;
+			case IP_CONST_WS_AMULET_SKILL_SEARCH_BONUS15:           return 52;
+			case IP_CONST_WS_AMULET_SKILL_SET_TRAP_BONUS15:         return 52;
+			case IP_CONST_WS_AMULET_SKILL_SPELLCRAFT_BONUS15:       return 52;
+			case IP_CONST_WS_AMULET_SKILL_SPOT_BONUS15:             return 52;
+			case IP_CONST_WS_AMULET_SKILL_TAUNT_BONUS15:            return 52;
+			case IP_CONST_WS_AMULET_SKILL_TUMBLE_BONUS15:           return 52;
+			case IP_CONST_WS_AMULET_SKILL_USE_MAGIC_DEVICE_BONUS15: return 52;
+			case IP_CONST_WS_AMULET_SKILL_DIPLOMACY_BONUS15:        return 52;
+			case IP_CONST_WS_AMULET_SKILL_CRAFT_ALCHEMY_BONUS15:    return 52;
+			case IP_CONST_WS_AMULET_SKILL_SLEIGHT_OF_HAND_BONUS15:  return 52;
+			case IP_CONST_WS_AMULET_SKILL_SURVIVAL_BONUS15:         return 52;
+			case IP_CONST_WS_BOOTS_DARKVISION:                      return 26;
+			case IP_CONST_WS_BOOTS_REGENERATION1:                   return 51;
+			case IP_CONST_WS_CLOAK_PARADE_BONUS2:                   return  1;
+			case IP_CONST_WS_BRACERS_BELT_CA_VS_BLUDGEONING_BONUS5: return  3;
+			case IP_CONST_WS_BRACERS_BELT_CA_VS_PIERCING_BONUS5:    return  3;
+			case IP_CONST_WS_BRACERS_BELT_CA_VS_SLASHING_BONUS5:    return  3;
+			case IP_CONST_WS_BRACERS_BELT_CONSTITUTION_BONUS2:      return  0;
+			case IP_CONST_WS_BRACERS_BELT_WISDOM_BONUS2:            return  0;
+			case IP_CONST_WS_BRACERS_BELT_INTELLIGENCE_BONUS2:      return  0;
+			case IP_CONST_WS_BRACERS_BELT_STRENGTH_BONUS2:          return  0;
+			case IP_CONST_WS_BRACERS_BELT_DEXTERITY_BONUS2:         return  0;
+			case IP_CONST_WS_BRACERS_BELT_CHARISMA_BONUS2:          return  0;
+			case IP_CONST_WS_HELM_CONSTITUTION_BONUS2:              return  0;
+			case IP_CONST_WS_HELM_WISDOM_BONUS2:                    return  0;
+			case IP_CONST_WS_HELM_INTELLIGENCE_BONUS2:              return  0;
+			case IP_CONST_WS_HELM_STRENGTH_BONUS2:                  return  0;
+			case IP_CONST_WS_HELM_DEXTERITY_BONUS2:                 return  0;
+			case IP_CONST_WS_HELM_CHARISMA_BONUS2:                  return  0;
+			case IP_CONST_WS_AMULET_CONSTITUTION_BONUS2:            return  0;
+			case IP_CONST_WS_AMULET_WISDOM_BONUS2:                  return  0;
+			case IP_CONST_WS_AMULET_INTELLIGENCE_BONUS2:            return  0;
+			case IP_CONST_WS_AMULET_STRENGTH_BONUS2:                return  0;
+			case IP_CONST_WS_AMULET_DEXTERITY_BONUS2:               return  0;
+			case IP_CONST_WS_AMULET_CHARISMA_BONUS2:                return  0;
+			case IP_CONST_WS_RING_CONSTITUTION_BONUS2:              return  0;
+			case IP_CONST_WS_RING_WISDOM_BONUS2:                    return  0;
+			case IP_CONST_WS_RING_INTELLIGENCE_BONUS2:              return  0;
+			case IP_CONST_WS_RING_STRENGTH_BONUS2:                  return  0;
+			case IP_CONST_WS_RING_DEXTERITY_BONUS2:                 return  0;
+			case IP_CONST_WS_RING_CHARISMA_BONUS2:                  return  0;
+			case IP_CONST_WS_BOOTS_CONSTITUTION_BONUS2:             return  0;
+			case IP_CONST_WS_BOOTS_WISDOM_BONUS2:                   return  0;
+			case IP_CONST_WS_BOOTS_INTELLIGENCE_BONUS2:             return  0;
+			case IP_CONST_WS_BOOTS_STRENGTH_BONUS2:                 return  0;
+			case IP_CONST_WS_BOOTS_DEXTERITY_BONUS2:                return  0;
+			case IP_CONST_WS_BOOTS_CHARISMA_BONUS2:                 return  0;
+			case IP_CONST_WS_CLOAK_CONSTITUTION_BONUS2:             return  0;
+			case IP_CONST_WS_CLOAK_WISDOM_BONUS2:                   return  0;
+			case IP_CONST_WS_CLOAK_INTELLIGENCE_BONUS2:             return  0;
+			case IP_CONST_WS_CLOAK_STRENGTH_BONUS2:                 return  0;
+			case IP_CONST_WS_CLOAK_DEXTERITY_BONUS2:                return  0;
+			case IP_CONST_WS_CLOAK_CHARISMA_BONUS2:                 return  0;
+			case IP_CONST_WS_SHIELD_CONSTITUTION_BONUS2:            return  0;
+			case IP_CONST_WS_SHIELD_WISDOM_BONUS2:                  return  0;
+			case IP_CONST_WS_SHIELD_INTELLIGENCE_BONUS2:            return  0;
+			case IP_CONST_WS_SHIELD_STRENGTH_BONUS2:                return  0;
+			case IP_CONST_WS_SHIELD_DEXTERITY_BONUS2:               return  0;
+			case IP_CONST_WS_SHIELD_CHARISMA_BONUS2:                return  0;
+			default: throw new Exception("Unknown enchantType "~enchantType.to!string);
+		}
+	}
+
+
+	deprecated void buildUsing2DA(){}
+}
