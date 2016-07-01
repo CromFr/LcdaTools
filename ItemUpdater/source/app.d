@@ -4,16 +4,16 @@ import std.getopt;
 import std.string;
 import std.stdint;
 import std.conv;
+import std.path;
 import std.file;
-alias write = std.stdio.write;
-alias writeFile = std.file.write;
+	alias write = std.stdio.write;
+	alias writeFile = std.file.write;
 import std.typecons: Tuple;
 import std.exception: assertThrown, assertNotThrown, enforce;
-import std.path;
 import std.algorithm;
-import std.array;
 import std.datetime: StopWatch;
-import std.math: sqrt;
+import std.parallelism;
+
 import nwn.gff;
 import nwn.twoda;
 
@@ -29,6 +29,7 @@ int main(string[] args){
 	string tempOvr;
 	string[string] updateMapPaths;
 	bool noninteractive = false;
+	uint parallelJobs = 1;
 
 	//Parse cmd line
 	try{
@@ -38,6 +39,7 @@ int main(string[] args){
 			"temp", "Temp folder for storing modified files installing them, and also backup files.\nDefault: $path_nwn2docs/itemupdater_tmp", &tempOvr,
 			required,"update", "Tag of the item with the updated blueprint.\nThe item blueprint can be a path to any UTI file or the resource name of an item on LcdaDev (without the .uti extension)\nCan be specified multiple times\nExample: --update ITEMTAG=mynewitem", &updateMapPaths,
 			"noninteractive|y", "Do not prompt and update everything", &noninteractive,
+			"j", "Number of parallel jobs\nDefault: 1", &parallelJobs,
 			).options;
 
 		if(res.helpWanted){
@@ -46,8 +48,10 @@ int main(string[] args){
 				res.options);
 			return 0;
 		}
+
+		enforce(parallelJobs>0, "-j option must be >= 1");
 	}
-	catch(GetOptException e){
+	catch(Exception e){
 		stderr.writeln(e.msg);
 		stderr.writeln("Use --help for more information");
 		return 1;
@@ -90,13 +94,11 @@ int main(string[] args){
 	writeln("".center(80, '='));
 	stdout.flush();
 
+	auto taskPool = new TaskPool(parallelJobs);
+
 	StopWatch bench;
 	bench.start;
-	foreach(charFile ; vault.dirEntries("*.bic", SpanMode.depth)){
-		import core.memory;
-		GC.collect;
-		GC.minimize;
-
+	foreach(charFile ; taskPool.parallel(vault.dirEntries("*.bic", SpanMode.depth))){
 		bool charUpdated = false;
 		uint refund = 0;
 		int[string] updatedItemStats;
@@ -152,7 +154,7 @@ int main(string[] args){
 			}
 		}
 
-		auto character = new Gff(charFile);
+		auto character = new Gff(cast(ubyte[])charFile.read);
 		updateInventory(character);
 
 		if(charUpdated){
@@ -182,6 +184,7 @@ int main(string[] args){
 			writeln();
 			stdout.flush();
 		}
+
 	}
 	bench.stop;
 
