@@ -13,6 +13,7 @@ import std.exception: assertThrown, assertNotThrown, enforce;
 import std.algorithm;
 import std.datetime: StopWatch;
 import std.parallelism;
+import core.thread;
 
 import nwn.gff;
 import nwn.twoda;
@@ -94,7 +95,7 @@ int main(string[] args){
 	writeln("".center(80, '='));
 	stdout.flush();
 
-	auto taskPool = new TaskPool(parallelJobs);
+	auto taskPool = new TaskPool(parallelJobs-1);
 
 	StopWatch bench;
 	bench.start;
