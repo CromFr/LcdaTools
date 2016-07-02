@@ -6,5 +6,6 @@ authors "Thibaut CHARLES"
 
 buildOptions "inline"
 dependency "nwn-lib-d" version="*"
+dependency "mysql-native" version="~>0.1.4"
 
 sourcePaths "source" "../source"

@@ -14,16 +14,19 @@ import std.algorithm;
 import std.datetime: StopWatch;
 import std.parallelism;
 import core.thread;
-
+import mysql.connection;
 import nwn.gff;
 import nwn.twoda;
 
 import lcdaconfig;
-
 import lib_forge_epique;
 
-string CFG_TwoDAPath = `C:\Users\Crom\Documents\Neverwinter Nights 2\override\LcdaClientSrc\lcda2da.hak\`;
-TwoDA[string] twoDAs;
+enum UpdatePolicy{
+	Override = 0,
+	Keep = 1,
+}
+UpdatePolicy cursedPolicy = UpdatePolicy.Override;
+UpdatePolicy plotPolicy = UpdatePolicy.Override;
 
 int main(string[] args){
 	string vaultOvr;
@@ -40,6 +43,8 @@ int main(string[] args){
 			"temp", "Temp folder for storing modified files installing them, and also backup files.\nDefault: $path_nwn2docs/itemupdater_tmp", &tempOvr,
 			required,"update", "Tag of the item with the updated blueprint.\nThe item blueprint can be a path to any UTI file or the resource name of an item on LcdaDev (without the .uti extension)\nCan be specified multiple times\nExample: --update ITEMTAG=mynewitem", &updateMapPaths,
 			"noninteractive|y", "Do not prompt and update everything", &noninteractive,
+			"policy-cursed", "Whether or not keeping the cursed property state through updates.\nValues: Override, Keep\nDefault: Keep", &cursedPolicy,
+			"policy-plot", "Whether or not keeping the plot property state through updates.\nValues: Override, Keep\nDefault: Keep", &plotPolicy,
 			"j", "Number of parallel jobs\nDefault: 1", &parallelJobs,
 			).options;
 
@@ -95,9 +100,10 @@ int main(string[] args){
 	writeln("".center(80, '='));
 	stdout.flush();
 
-	auto taskPool = new TaskPool(parallelJobs-1);
-
 	StopWatch bench;
+
+	auto taskPool = new TaskPool(parallelJobs-1);
+	scope(exit) taskPool.finish;
 	bench.start;
 	foreach(charFile ; taskPool.parallel(vault.dirEntries("*.bic", SpanMode.depth))){
 		bool charUpdated = false;
@@ -126,6 +132,9 @@ int main(string[] args){
 			foreach(ref item ; container["ItemList"].as!(GffType.List)){
 				if(item["Tag"].to!string in updateMap){
 					updateSingleItem(item);
+				}
+				if("ItemList" in item.as!(GffType.Struct)){
+					updateInventory(item);
 				}
 			}
 
@@ -188,13 +197,123 @@ int main(string[] args){
 
 	}
 	bench.stop;
+	writeln(">>> ",bench.peek.msecs/1000.0," seconds");
+
+
+
+	writeln();
+	writeln("".center(80, '='));
+	writeln("  SQL - IBEE  ".center(80, '|'));
+	writeln("".center(80, '='));
+	writeln();
+	stdout.flush();
+	auto conn = new Connection(
+		LcdaConfig["sql_address"],
+		LcdaConfig["sql_user"],
+		LcdaConfig["sql_password"],
+		LcdaConfig["sql_schema"]);
+	scope(exit) conn.close();
+	Command(conn, "SET autocommit=0").execSQL;
+	ulong affectedRows;
+
+	void refundInBank(string account, int amount){
+		auto cmdRefund = Command(conn, "UPDATE account SET ibee_bank=(ibee_bank+?) WHERE name=?");
+		cmdRefund.prepare;
+		cmdRefund.bindParameterTuple(amount, account);
+		cmdRefund.execPrepared(affectedRows);
+		enforce(affectedRows==1, "Wrong number of rows affected by SQL query");
+	}
+
+	//COFFREIBEE
+	bench.reset;
+	bench.start;
+	auto res = Command(conn, "SELECT id, account_name, item_data FROM coffreibee").execSQLResult;
+	foreach(row ; taskPool.parallel(res)){
+		auto id = row[0].get!long;
+		auto owner = row[1].get!string;
+		auto item = new Gff(row[2].get!(ubyte[]));
+
+		immutable tag = item["Tag"].to!string;
+		if(auto blueprint = tag in updateMap){
+			//Item will be updated and name will be changed
+			auto update = item.updateItem(*blueprint);
+
+			item.root = update.item;
+			ubyte[] updatedData = item.serialize();
+
+			//Update item data
+			auto cmdUpdate = Command(conn,
+					"UPDATE coffreibee SET"
+						~" item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name),"
+						~" item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description),"
+						~" item_data=?"
+					~" WHERE id=?");
+			cmdUpdate.prepare;
+			cmdUpdate.bindParameterTuple(updatedData, id);
+			cmdUpdate.execPrepared(affectedRows);
+			enforce(affectedRows==1, "Wrong number of rows affected by SQL query");
+
+			if(update.refund > 0){
+				//Apply refund in bank
+				refundInBank(owner, update.refund);
+			}
+
+			writeln("coffreibee[",id,"] ",tag," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
+			stdout.flush();
+		}
+
+
+	}
+	//CASIERIBEE
+	res = Command(conn, "SELECT id, vendor_account_name, item_data FROM casieribee WHERE active=1").execSQLResult;
+	foreach(row ; taskPool.parallel(res)){
+		auto id = row[0].get!long;
+		auto owner = row[1].get!string;
+		auto item = new Gff(row[2].get!(ubyte[]));
+
+		immutable tag = item["Tag"].to!string;
+		if(auto blueprint = tag in updateMap){
+			//Item will be updated and marked as sold with price = 0gp
+			auto update = item.updateItem(*blueprint);
+
+			item.root = update.item;
+			ubyte[] updatedData = item.serialize();
+
+			//Update item data
+			auto cmdUpdate = Command(conn,
+					"UPDATE casieribee SET"
+						~" item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name),"
+						~" item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description),"
+						~" sale_allowed=0,"
+						~" item_data=?"
+					~" WHERE id=?");
+			cmdUpdate.prepare;
+			cmdUpdate.bindParameterTuple(updatedData, id);
+			cmdUpdate.execPrepared(affectedRows);
+			enforce(affectedRows==1, "Wrong number of rows affected by SQL query");
+
+			if(update.refund > 0){
+				//Apply refund in bank
+				refundInBank(owner, update.refund);
+			}
+
+			writeln("casieribee[",id,"] ",tag," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
+			stdout.flush();
+		}
+
+
+	}
+	bench.stop;
+	writeln(">>> ",bench.peek.msecs/1000.0," seconds");
+
+
 
 
 	writeln();
 	writeln("".center(80, '='));
 	writeln("  INSTALLATION  ".center(80, '|'));
 	writeln("".center(80, '='));
-	writeln("All items have been updated in ", bench.peek.msecs/1000.0, " seconds");
+	writeln("All items have been updated");
 	writeln("- new character files have been put in ", buildPath(temp, "updated_vault"));
 	writeln("- new items in database are pending for SQL commit");
 	writeln();
@@ -223,13 +342,15 @@ int main(string[] args){
 						throw new Exception("Cannot copy '"~from~"': '"~to~"' already exists and is not a directory");
 				}
 				else{
-					writeln("cp ",from," ",to);
+					writeln("> ",to);
 					stdout.flush();
 					copy(from, to);
 				}
 			}
-			copyRecurse(buildPath(temp, "updated_vault"), vault);
+			//copyRecurse(buildPath(temp, "updated_vault"), vault);
+
 			//SQL commit
+			Command(conn, "COMMIT").execSQL;
 
 			return 0;
 		}
@@ -237,6 +358,7 @@ int main(string[] args){
 
 
 	//SQL rollback
+	Command(conn, "ROLLBACK").execSQL;
 
 
 	return 0;
@@ -260,7 +382,8 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint){
 		updatedItem.as!Struct.remove("UVScroll");
 
 		//Add instance & inventory props
-		updatedItem.appendField(oldItem["ObjectId"].dup);
+		if("ObjectId" in oldItem.as!Struct)
+			updatedItem.appendField(oldItem["ObjectId"].dup);
 		if("Repos_Index" in oldItem.as!Struct)
 			updatedItem.appendField(oldItem["Repos_Index"].dup);
 		updatedItem.appendField(oldItem["ActionList"].dup);
@@ -287,6 +410,12 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint){
 				~" ("~oldItem["Tag"].to!string~" => "~blueprint["TemplateResRef"].to!string~")");
 			//The item is a container (bag)
 			updatedItem["ItemList"] = oldItem["ItemList"].dup;
+		}
+		if(cursedPolicy == UpdatePolicy.Keep){
+			updatedItem["Cursed"] = oldItem["Cursed"].dup;
+		}
+		if(plotPolicy == UpdatePolicy.Keep){
+			updatedItem["Plot"] = oldItem["Plot"].dup;
 		}
 
 		//Fix nwn2 oddities
