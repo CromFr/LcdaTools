@@ -8,11 +8,11 @@ class LcdaConfig{
 static:
 	GetoptResult init(ref string[] args){
 
-		string configPath = "../config.json";
+		string configPath;
 		string[string] configOverride;
 
 		auto res = getopt(args, config.passThrough,
-			"config|c","LCDA config file to use\nDefault: ../config.json", &configPath,
+			"config|c","LCDA config file to use\nDefault: ./config.json or ../config.json (whichever exists)", &configPath,
 			"configovr","Override a value in config\nSyntax is `--configovr foo=key`\nCan be specified multiple times", &configOverride,
 			);
 		res.options = res.options[0..$-1];//remove help option
@@ -21,6 +21,16 @@ static:
 
 
 		import std.file: readText;
+
+		if(configPath is null){
+			import std.path: exists;
+			if("./config.json".exists)
+				configPath = "./config.json";
+			else if("../config.json".exists)
+				configPath = "../config.json";
+			else
+				throw new Exception("Could not find config.json");
+		}
 		auto json = parseJSON(configPath.readText);
 
 		foreach(string key, ref value ; json){
