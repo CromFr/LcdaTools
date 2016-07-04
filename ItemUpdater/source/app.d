@@ -124,6 +124,20 @@ int main(string[] args){
 		LcdaConfig["sql_schema"]);
 	scope(exit) conn.close();
 
+	if(temp.exists){
+		if(noninteractive==false && !temp.dirEntries(SpanMode.shallow).empty){
+			stderr.writeln("WARNING: '",temp,"' is not empty and may contain backups from previous item updates");
+			writeln();
+			write("'d' to delete content and continue: ");
+			stdout.flush();
+			if(readln()[0] != 'd')
+				return 1;
+		}
+		temp.rmdirRecurse;
+		writeln("Deleted '",temp,"'");
+	}
+	temp.mkdirRecurse;
+
 
 	//Servervault update
 	if(!skipVault){
@@ -132,20 +146,6 @@ int main(string[] args){
 		writeln("  SERVERVAULT UPDATE  ".center(80, '|'));
 		writeln("".center(80, '='));
 		stdout.flush();
-
-		if(temp.exists){
-			if(noninteractive==false && !temp.dirEntries(SpanMode.shallow).empty){
-				stderr.writeln("WARNING: '",temp,"' is not empty and may contain backups from previous item updates");
-				writeln();
-				write("'d' to delete content and continue: ");
-				stdout.flush();
-				if(readln()[0] != 'd')
-					return 1;
-			}
-			temp.rmdirRecurse;
-			writeln("Deleted '",temp,"'");
-		}
-		temp.mkdirRecurse;
 
 
 		bench.start;
@@ -256,6 +256,11 @@ int main(string[] args){
 		writeln();
 		stdout.flush();
 
+		immutable coffreIbeeBackup = buildPath(temp, "backup_coffreibee");
+		coffreIbeeBackup.mkdirRecurse;
+		immutable casierIbeeBackup = buildPath(temp, "backup_casieribee");
+		casierIbeeBackup.mkdirRecurse;
+
 		Command(conn, "SET autocommit=0").execSQL;
 		ulong affectedRows;
 
@@ -274,7 +279,8 @@ int main(string[] args){
 		foreach(row ; taskPool.parallel(res)){
 			auto id = row[0].get!long;
 			auto owner = row[1].get!string;
-			auto item = new Gff(row[2].get!(ubyte[]));
+			auto itemData = row[2].get!(ubyte[]);
+			auto item = new Gff(itemData);
 
 			immutable tag = item["Tag"].to!string;
 			if(auto blueprint = tag in updateMap){
@@ -302,7 +308,7 @@ int main(string[] args){
 					refundInBank(owner, update.refund);
 				}
 
-				//TODO: backup
+				buildPath(coffreIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
 
 				writeln("coffreibee[",id,"] ",tag," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
 				stdout.flush();
@@ -316,7 +322,8 @@ int main(string[] args){
 		foreach(row ; taskPool.parallel(res)){
 			auto id = row[0].get!long;
 			auto owner = row[1].get!string;
-			auto item = new Gff(row[2].get!(ubyte[]));
+			auto itemData = row[2].get!(ubyte[]);
+			auto item = new Gff(itemData);
 
 			immutable tag = item["Tag"].to!string;
 			if(auto blueprint = tag in updateMap){
@@ -345,7 +352,7 @@ int main(string[] args){
 					refundInBank(owner, update.refund);
 				}
 
-				//TODO: backup
+				buildPath(casierIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
 
 				writeln("casieribee[",id,"] ",tag," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
 				stdout.flush();
