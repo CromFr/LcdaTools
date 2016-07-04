@@ -3,6 +3,7 @@ import std.json;
 import std.getopt;
 import std.conv;
 import std.exception: enforce;
+import std.path: exists;
 
 class LcdaConfig{
 static shared:
@@ -23,7 +24,6 @@ static shared:
 		import std.file: readText;
 
 		if(configPath is null){
-			import std.path: exists;
 			if("./config.json".exists)
 				configPath = "./config.json";
 			else if("../config.json".exists)
@@ -47,6 +47,10 @@ static shared:
 			values[key] = value;
 		}
 
+		foreach(key ; ["path_nwn2docs","path_nwn2prg","path_lcdadev","path_lcdaclientsrc"]){
+			enforce(values[key].exists, "Path '"~values[key]~"' does not exist");
+		}
+
 		return res;
 	}
 
@@ -56,7 +60,7 @@ static shared:
 }
 
 
-void improvedGetoptPrinter(string text, Option[] opt){
+void improvedGetoptPrinter(string text, Option[] opt, int width=80){
 	import std.stdio: writef, writeln;
 	import std.string: wrap, leftJustify, splitLines;
 	import std.algorithm: map, reduce;
@@ -85,7 +89,7 @@ void improvedGetoptPrinter(string text, Option[] opt){
 
 		auto wrappedText = o.help
 			.splitLines
-			.map!(a=>a.wrap(80-widthHelpIndentation).splitLines)
+			.map!(a=>a.wrap(width-widthHelpIndentation).splitLines)
 			.reduce!(delegate(a, b){return a~b;});
 
 		bool first = true;

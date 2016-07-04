@@ -77,8 +77,8 @@ int main(string[] args){
 			"policy", policyHelp, &updatePolicy,
 			"skip-vault", "Do not update the servervault", &skipVault,
 			"skip-sql", "Do not update the items in the SQL db (coffreibee, casieribee)", &skipSql,
-			"y", "Do not prompt and accept everything", &noninteractive,
-			"j", "Number of parallel jobs\nDefault: 1", &parallelJobs,
+			"y|y", "Do not prompt and accept everything", &noninteractive,
+			"j|j", "Number of parallel jobs\nDefault: 1", &parallelJobs,
 			).options;
 
 		if(res.helpWanted){
