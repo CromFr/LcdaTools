@@ -3,7 +3,7 @@ import std.conv: to;
 
 
 // Copy/paste from LCDA lib_forge_epique.nss
-// Added default: throw new Exception("Could not get gold value for enchantment id="~nService.to!string);
+// Added default: assert(0, "Could not get gold value for enchantment id="~nService.to!string);
 // to PrixDuService(...)
 
 
@@ -304,7 +304,7 @@ int PrixDuService(int nService)
       			case IP_CONST_WS_BRACERS_BELT_CHARISMA_BONUS2 :
       			case IP_CONST_WS_BRACERS_BELT_CONSTITUTION_BONUS2 :nGoldNeed =WS_COST_ARMOR_STAT_BONUS2; break;
 
-            default: throw new Exception("Could not get gold value for enchantment id="~nService.to!string);
+            default: assert(0, "Could not get gold value for enchantment id="~nService.to!string);
         }
     return nGoldNeed;
 }
