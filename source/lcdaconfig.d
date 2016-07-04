@@ -5,7 +5,7 @@ import std.conv;
 import std.exception: enforce;
 
 class LcdaConfig{
-static:
+static shared:
 	GetoptResult init(ref string[] args){
 
 		string configPath;

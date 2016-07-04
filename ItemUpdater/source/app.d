@@ -22,15 +22,13 @@ import lcdaconfig;
 import lib_forge_epique;
 
 
-ref const(TwoDA) getTwoDA(in string name){
+auto ref TwoDA getTwoDA(in string name){
 	static __gshared TwoDA[string] twoDACache;
 
 	immutable n = name.toLower;
-
 	synchronized{
 		if(auto ret = n in twoDACache)
 			return *ret;
-
 		return twoDACache[n] = new TwoDA(buildPath(LcdaConfig["path_lcdaclientsrc"],"lcda2da.hak",n~".2da"));
 	}
 }
@@ -39,8 +37,10 @@ enum UpdatePolicy{
 	Override = 0,
 	Keep = 1,
 }
-UpdatePolicy cursedPolicy = UpdatePolicy.Override;
-UpdatePolicy plotPolicy = UpdatePolicy.Override;
+
+alias ItemPolicy = UpdatePolicy[string];
+ItemPolicy[string] updatePolicy;
+// --policy ItemTag="Cursed=Override,Plot=Keep,Var.bIntelligent=Override"
 
 int main(string[] args){
 	string vaultOvr;
@@ -53,17 +53,31 @@ int main(string[] args){
 
 	//Parse cmd line
 	try{
+		enum updateHelp =
+			 "Tag of the item with the updated blueprint.\n"
+			 ~"The item blueprint can be a path to any UTI file or the resource name of an item on LcdaDev (without the .uti extension).\n"
+			 ~"Can be specified multiple times.\n"
+			 ~"Example: --update ITEMTAG=itemresref&ITEMTAG2=itemresref2";
+		enum policyHelp =
+			 "Policy for overriding/keeping properties and local vars values of each updated item."
+			~" You can override/keep local variables using 'Var.$var_name:$policy'."
+			~" Can be specified multiple times'\n"
+			~"Setting a local variable that does not exist in the blueprint to Override will delete it from the item.\n"
+			~"Default: Override for properties, Keep for local vars\n"
+			~"Example properties: 'Cursed', 'Plot'\n"
+			~"Example: --policy ITEMTAG='[\"Cursed\":Keep,\"Var.bIntelligent\":Override]'";
+
+
 		auto res = LcdaConfig.init(args);
-		arraySep = ",";
+		arraySep = "&";
 		res.options ~= getopt(args,
 			"vault", "Vault containing all character bic files to update.\nDefault: $path_nwn2docs/servervault", &vaultOvr,
 			"temp", "Temp folder for storing modified files installing them, and also backup files.\nDefault: $path_nwn2docs/itemupdater_tmp", &tempOvr,
-			required,"update", "Tag of the item with the updated blueprint.\nThe item blueprint can be a path to any UTI file or the resource name of an item on LcdaDev (without the .uti extension)\nCan be specified multiple times\nExample: --update ITEMTAG=mynewitem", &updateMapPaths,
-			"noninteractive|y", "Do not prompt and update everything", &noninteractive,
-			"policy-cursed", "Whether or not keeping the cursed property state through updates.\nValues: Override, Keep\nDefault: Keep", &cursedPolicy,
-			"policy-plot", "Whether or not keeping the plot property state through updates.\nValues: Override, Keep\nDefault: Keep", &plotPolicy,
+			required,"update", updateHelp, &updateMapPaths,
+			"policy", policyHelp, &updatePolicy,
 			"skip-vault", "Do not update the servervault", &skipVault,
 			"skip-sql", "Do not update the items in the SQL db (coffreibee, casieribee)", &skipSql,
+			"y", "Do not prompt and accept everything", &noninteractive,
 			"j", "Number of parallel jobs\nDefault: 1", &parallelJobs,
 			).options;
 
@@ -144,13 +158,15 @@ int main(string[] args){
 				immutable tag = item["Tag"].to!string;
 				assert(tag in updateMap);
 
+				charUpdated = true;
 				if(auto cnt = tag in updatedItemStats)
 					(*cnt)++;
 				else
 					updatedItemStats[tag] = 1;
 
-				charUpdated = true;
-				auto update = item.updateItem(updateMap[tag], charFile.relativePath(vault));
+
+				auto policy = tag in updatePolicy;
+				auto update = item.updateItem(updateMap[tag], policy? *policy : null, charFile.relativePath(vault));
 
 				refund += update.refund;
 				item = update.item;
@@ -263,7 +279,8 @@ int main(string[] args){
 			immutable tag = item["Tag"].to!string;
 			if(auto blueprint = tag in updateMap){
 				//Item will be updated and name will be changed
-				auto update = item.updateItem(*blueprint, "coffreibee["~id.to!string~"]");
+				auto policy = tag in updatePolicy;
+				auto update = item.updateItem(*blueprint, policy? *policy : null, "coffreibee["~id.to!string~"]");
 
 				item.root = update.item;
 				ubyte[] updatedData = item.serialize();
@@ -285,12 +302,15 @@ int main(string[] args){
 					refundInBank(owner, update.refund);
 				}
 
+				//TODO: backup
+
 				writeln("coffreibee[",id,"] ",tag," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
 				stdout.flush();
 			}
 
 
 		}
+		writeln("-----");
 		//CASIERIBEE
 		res = Command(conn, "SELECT id, vendor_account_name, item_data FROM casieribee WHERE active=1").execSQLResult;
 		foreach(row ; taskPool.parallel(res)){
@@ -301,7 +321,8 @@ int main(string[] args){
 			immutable tag = item["Tag"].to!string;
 			if(auto blueprint = tag in updateMap){
 				//Item will be updated and marked as sold with price = 0gp
-				auto update = item.updateItem(*blueprint, "casieribee["~id.to!string~"]");
+				auto policy = tag in updatePolicy;
+				auto update = item.updateItem(*blueprint, policy? *policy : null, "casieribee["~id.to!string~"]");
 
 				item.root = update.item;
 				ubyte[] updatedData = item.serialize();
@@ -323,6 +344,8 @@ int main(string[] args){
 					//Apply refund in bank
 					refundInBank(owner, update.refund);
 				}
+
+				//TODO: backup
 
 				writeln("casieribee[",id,"] ",tag," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
 				stdout.flush();
@@ -356,6 +379,7 @@ int main(string[] args){
 
 		if(ans=='y'){
 			//Copy char to new vault
+			size_t count;
 			void copyRecurse(string from, string to){
 				if(isDir(from)){
 					if(!to.exists){
@@ -370,18 +394,26 @@ int main(string[] args){
 						throw new Exception("Cannot copy '"~from~"': '"~to~"' already exists and is not a directory");
 				}
 				else{
-					writeln("> ",to);
-					stdout.flush();
+					//writeln("> ",to); stdout.flush();
 					copy(from, to);
+					count++;
 				}
 			}
 
-			if(!skipVault)
+			if(!skipVault){
 				copyRecurse(buildPath(temp, "updated_vault"), vault);
+				writeln(count," files copied");
+				stdout.flush();
+			}
 
 			//SQL commit
-			if(!skipSql)
+			if(!skipSql){
 				Command(conn, "COMMIT").execSQL;
+				writeln("SQL work commited");
+				stdout.flush();
+			}
+
+			writeln("  DONE !  ".center(80, '_'));
 
 			return 0;
 		}
@@ -398,9 +430,9 @@ int main(string[] args){
 
 
 ///
-auto updateItem(in GffNode oldItem, in GffNode blueprint, lazy string ownerName){
+auto updateItem(in GffNode oldItem, in GffNode blueprint, ItemPolicy itemPolicy, lazy string ownerName){
 	bool enchanted = false;
-	int enchantmentId;
+	EnchantmentId enchantment;
 
 	GffNode updatedItem = blueprint.dup;
 	updatedItem.structType = 0;
@@ -442,12 +474,6 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, lazy string ownerName)
 		//The item is a container (bag)
 		updatedItem["ItemList"] = oldItem["ItemList"].dup;
 	}
-	if(cursedPolicy == UpdatePolicy.Keep){
-		updatedItem["Cursed"] = oldItem["Cursed"].dup;
-	}
-	if(plotPolicy == UpdatePolicy.Keep){
-		updatedItem["Plot"] = oldItem["Plot"].dup;
-	}
 
 	//Fix nwn2 oddities
 	updatedItem["ArmorRulesType"] = GffNode(GffType.Int, "ArmorRulesType", blueprint["ArmorRulesType"].as!GffByte);
@@ -460,49 +486,75 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, lazy string ownerName)
 	}
 
 
-
 	//Copy local variables
-	//  rule: override oldItem vars with blueprint vars
-	size_t[string] varsInBlueprint;
-	foreach(i, ref var ; blueprint["VarTable"].as!GffList)
-		varsInBlueprint[var["Name"].as!GffExoString] = i;
+	size_t[string] varsInUpdatedItem;
+	foreach(i, ref var ; updatedItem["VarTable"].as!GffList)
+		varsInUpdatedItem[var["Name"].as!GffExoString] = i;
 
-	foreach(ref varNode ; oldItem["VarTable"].as!GffList){
-		//Append oldItem var if not in blueprint
-		if(varNode.label !in varsInBlueprint){
-			immutable name = varNode["Name"].to!string;
-			if(name=="DEJA_ENCHANTE"){
-				//stderr.writeln("DEJA_ENCHANTE=",varNode["Value"].as!GffInt);
-				enchanted     = varNode["Value"].to!bool;
-			}
-			else if(name=="X2_LAST_PROPERTY"){
-				//stderr.writeln("X2_LAST_PROPERTY=",varNode["Value"].as!GffInt);
-				enchantmentId = varNode["Value"].as!GffInt;
-			}
+	foreach(ref oldItemVar ; oldItem["VarTable"].as!GffList){
+		immutable name = oldItemVar["Name"].to!string;
 
-			updatedItem["VarTable"].as!GffList ~= varNode.dup;
+		auto policy = UpdatePolicy.Keep;
+		if(auto p = ("Var."~name) in itemPolicy)
+			policy = *p;
+
+
+		if(name=="DEJA_ENCHANTE")
+			enchanted   = oldItemVar["Value"].to!bool;
+		else if(name=="X2_LAST_PROPERTY")
+			enchantment = oldItemVar["Value"].as!GffInt.to!EnchantmentId;
+
+		if(auto idx = name in varsInUpdatedItem){
+			//Var is in updatedItem (inherited from blueprint)
+			//Set var using policy
+			if(policy == UpdatePolicy.Keep){
+				//Copy old item var to updated item
+				updatedItem["VarTable"][*idx] = oldItemVar.dup;
+			}
+			else{
+				//keep the var inherited from blueprint
+			}
+		}
+		else{
+			//Var not found in blueprint
+			//Append var
+			if(policy == UpdatePolicy.Keep){
+				//Add oldvar to updated item
+				varsInUpdatedItem[name] = updatedItem["VarTable"].as!GffList.length;
+				updatedItem["VarTable"].as!GffList ~= oldItemVar.dup;
+			}
+			else{
+				//Do not add oldvar to updated item
+			}
+		}
+	}
+
+	//Property policy
+	foreach(propName, policy ; itemPolicy){
+		if(propName.length<4 || propName[0..4]!="Var."){
+			//policy is for a property
+			auto propOld = propName in oldItem.as!GffStruct;
+			auto propUpd = propName in updatedItem.as!GffStruct;
+			enforce(propOld && propUpd, "Property '"~propName~"' does not exist in both instance and blueprint, impossible to enforce policy.");
+			if(policy == UpdatePolicy.Keep){
+				*propUpd = propOld.dup;
+			}
 		}
 	}
 
 	//Enchantment
 	int refund = 0;
 	if(enchanted){
-		try updatedItem.enchantItem(enchantmentId);
+		try updatedItem.enchantItem(enchantment);
 		catch(EnchantmentException e){
 			stderr.writeln("WARNING: ",ownerName,":",updatedItem["Tag"].to!string,": ",e.msg, " - Enchantment refunded");
 
 			//Refund enchantment
-			refund = PrixDuService(enchantmentId);
+			refund = PrixDuService(enchantment);
 			assert(refund != 0);
 
 
 			//Remove enchantment variables
-			//updatedItem["VarTable"]
-			//	.as!GffList
-			//	.remove!((var){
-			//			stderr.writeln("Lookin at ",var["Name"].to!string, "=========",var["Name"].to!string=="DEJA_ENCHANTE" || var["Name"].to!string=="X2_LAST_PROPERTY");
-			//			return var["Name"].to!string=="DEJA_ENCHANTE" || var["Name"].to!string=="X2_LAST_PROPERTY";
-			//		});
 			foreach_reverse(i, ref var ; updatedItem["VarTable"].as!GffList){
 				if(var["Name"].to!string=="DEJA_ENCHANTE" || var["Name"].to!string=="X2_LAST_PROPERTY"){
 					immutable l = updatedItem["VarTable"].as!GffList.length;
@@ -594,7 +646,7 @@ class EnchantmentException : Exception{
 	}
 }
 
-void enchantItem(ref GffNode item, int enchantType){
+void enchantItem(ref GffNode item, EnchantmentId enchantType){
 	GffNode* findExistingProperty(in PropType propType){
 		foreach(ref prop ; item["PropertiesList"].as!GffList){
 			if(prop["PropertyName"].as!GffWord == propType.propertyName
@@ -699,134 +751,139 @@ struct PropType{
 	}
 }
 
-PropType getPropertyType(uint baseItemType, uint enchantType){
+PropType getPropertyType(uint baseItemType, EnchantmentId enchantType){
 	//Indices are found in itempropdef.2da
-	switch(enchantType){
-		case 0: .. case 13:                                     return PropType(16, enchantType,  7);//7 is for 1d6
-		case IP_CONST_WS_ARMOR_STRENGTH_BONUS2:                 return PropType(0,  0,            2);
-		case IP_CONST_WS_ARMOR_DEXTERITY_BONUS2:                return PropType(0,  1,            2);
-		case IP_CONST_WS_ARMOR_CONSTITUTION_BONUS2:             return PropType(0,  2,            2);
-		case IP_CONST_WS_ARMOR_INTELLIGENCE_BONUS2:             return PropType(0,  3,            2);
-		case IP_CONST_WS_ARMOR_WISDOM_BONUS2:                   return PropType(0,  4,            2);
-		case IP_CONST_WS_ARMOR_CHARISMA_BONUS2:                 return PropType(0,  5,            2);
-		case IP_CONST_WS_BRACERS_BELT_STRENGTH_BONUS2:          return PropType(0,  0,            2);
-		case IP_CONST_WS_BRACERS_BELT_DEXTERITY_BONUS2:         return PropType(0,  1,            2);
-		case IP_CONST_WS_BRACERS_BELT_CONSTITUTION_BONUS2:      return PropType(0,  2,            2);
-		case IP_CONST_WS_BRACERS_BELT_INTELLIGENCE_BONUS2:      return PropType(0,  3,            2);
-		case IP_CONST_WS_BRACERS_BELT_WISDOM_BONUS2:            return PropType(0,  4,            2);
-		case IP_CONST_WS_BRACERS_BELT_CHARISMA_BONUS2:          return PropType(0,  5,            2);
-		case IP_CONST_WS_HELM_STRENGTH_BONUS2:                  return PropType(0,  0,            2);
-		case IP_CONST_WS_HELM_DEXTERITY_BONUS2:                 return PropType(0,  1,            2);
-		case IP_CONST_WS_HELM_CONSTITUTION_BONUS2:              return PropType(0,  2,            2);
-		case IP_CONST_WS_HELM_INTELLIGENCE_BONUS2:              return PropType(0,  3,            2);
-		case IP_CONST_WS_HELM_WISDOM_BONUS2:                    return PropType(0,  4,            2);
-		case IP_CONST_WS_HELM_CHARISMA_BONUS2:                  return PropType(0,  5,            2);
-		case IP_CONST_WS_AMULET_STRENGTH_BONUS2:                return PropType(0,  0,            2);
-		case IP_CONST_WS_AMULET_DEXTERITY_BONUS2:               return PropType(0,  1,            2);
-		case IP_CONST_WS_AMULET_CONSTITUTION_BONUS2:            return PropType(0,  2,            2);
-		case IP_CONST_WS_AMULET_INTELLIGENCE_BONUS2:            return PropType(0,  3,            2);
-		case IP_CONST_WS_AMULET_WISDOM_BONUS2:                  return PropType(0,  4,            2);
-		case IP_CONST_WS_AMULET_CHARISMA_BONUS2:                return PropType(0,  5,            2);
-		case IP_CONST_WS_RING_STRENGTH_BONUS2:                  return PropType(0,  0,            2);
-		case IP_CONST_WS_RING_DEXTERITY_BONUS2:                 return PropType(0,  1,            2);
-		case IP_CONST_WS_RING_CONSTITUTION_BONUS2:              return PropType(0,  2,            2);
-		case IP_CONST_WS_RING_INTELLIGENCE_BONUS2:              return PropType(0,  3,            2);
-		case IP_CONST_WS_RING_WISDOM_BONUS2:                    return PropType(0,  4,            2);
-		case IP_CONST_WS_RING_CHARISMA_BONUS2:                  return PropType(0,  5,            2);
-		case IP_CONST_WS_BOOTS_STRENGTH_BONUS2:                 return PropType(0,  0,            2);
-		case IP_CONST_WS_BOOTS_DEXTERITY_BONUS2:                return PropType(0,  1,            2);
-		case IP_CONST_WS_BOOTS_CONSTITUTION_BONUS2:             return PropType(0,  2,            2);
-		case IP_CONST_WS_BOOTS_INTELLIGENCE_BONUS2:             return PropType(0,  3,            2);
-		case IP_CONST_WS_BOOTS_WISDOM_BONUS2:                   return PropType(0,  4,            2);
-		case IP_CONST_WS_BOOTS_CHARISMA_BONUS2:                 return PropType(0,  5,            2);
-		case IP_CONST_WS_CLOAK_STRENGTH_BONUS2:                 return PropType(0,  0,            2);
-		case IP_CONST_WS_CLOAK_DEXTERITY_BONUS2:                return PropType(0,  1,            2);
-		case IP_CONST_WS_CLOAK_CONSTITUTION_BONUS2:             return PropType(0,  2,            2);
-		case IP_CONST_WS_CLOAK_INTELLIGENCE_BONUS2:             return PropType(0,  3,            2);
-		case IP_CONST_WS_CLOAK_WISDOM_BONUS2:                   return PropType(0,  4,            2);
-		case IP_CONST_WS_CLOAK_CHARISMA_BONUS2:                 return PropType(0,  5,            2);
-		case IP_CONST_WS_SHIELD_STRENGTH_BONUS2:                return PropType(0,  0,            2);
-		case IP_CONST_WS_SHIELD_DEXTERITY_BONUS2:               return PropType(0,  1,            2);
-		case IP_CONST_WS_SHIELD_CONSTITUTION_BONUS2:            return PropType(0,  2,            2);
-		case IP_CONST_WS_SHIELD_INTELLIGENCE_BONUS2:            return PropType(0,  3,            2);
-		case IP_CONST_WS_SHIELD_WISDOM_BONUS2:                  return PropType(0,  4,            2);
-		case IP_CONST_WS_SHIELD_CHARISMA_BONUS2:                return PropType(0,  5,            2);
-		case IP_CONST_WS_ARMOR_BONUS_CA2:                       return PropType(1,  uint16_t.max, 2);
-		case IP_CONST_WS_CLOAK_PARADE_BONUS2:                   return PropType(1,  uint16_t.max, 2);
-		case IP_CONST_WS_BRACERS_BELT_CA_VS_BLUDGEONING_BONUS5: return PropType(3,  0,            5);
-		case IP_CONST_WS_BRACERS_BELT_CA_VS_PIERCING_BONUS5:    return PropType(3,  1,            5);
-		case IP_CONST_WS_BRACERS_BELT_CA_VS_SLASHING_BONUS5:    return PropType(3,  2,            5);
-		case IP_CONST_WS_ENHANCEMENT_BONUS:                     return PropType(6,  uint16_t.max, 1);
-		case IP_CONST_WS_HELM_DAMAGERESISTANCE5_BLUDGEONING:    return PropType(23, 0,            5);
-		case IP_CONST_WS_HELM_DAMAGERESISTANCE5_PIERCING:       return PropType(23, 1,            5);
-		case IP_CONST_WS_HELM_DAMAGERESISTANCE5_SLASHING:       return PropType(23, 2,            5);
-		case IP_CONST_WS_HELM_DAMAGERESISTANCE5_MAGICAL:        return PropType(23, 5,            5);
-		case IP_CONST_WS_HELM_DAMAGERESISTANCE5_ACID:           return PropType(23, 6,            5);
-		case IP_CONST_WS_HELM_DAMAGERESISTANCE5_COLD:           return PropType(23, 7,            5);
-		case IP_CONST_WS_HELM_DAMAGERESISTANCE5_DIVINE:         return PropType(23, 8,            5);
-		case IP_CONST_WS_HELM_DAMAGERESISTANCE5_ELECTRICAL:     return PropType(23, 9,            5);
-		case IP_CONST_WS_HELM_DAMAGERESISTANCE5_FIRE:           return PropType(23, 10,           5);
-		case IP_CONST_WS_HELM_DAMAGERESISTANCE5_NEGATIVE:       return PropType(23, 11,           5);
-		case IP_CONST_WS_HELM_DAMAGERESISTANCE5_POSITIVE:       return PropType(23, 12,           5);
-		case IP_CONST_WS_HELM_DAMAGERESISTANCE5_SONIC:          return PropType(23, 13,           5);
-		case IP_CONST_WS_BOOTS_DARKVISION:                      return PropType(26);
-		case IP_CONST_WS_HASTE:                                 return PropType(35);
-		case IP_CONST_WS_RING_IMMUNE_ABSORBTION:                return PropType(37, 1);
-		case IP_CONST_WS_RING_IMMUNE_TERROR:                    return PropType(37, 5);
-		case IP_CONST_WS_RING_IMMUNE_DEATH:                     return PropType(37, 9);
-		case IP_CONST_WS_SPELLRESISTANCE:                       return PropType(39, uint16_t.max, 0);//+10
-		case IP_CONST_WS_SHIELD_SPELLRESISTANCE10:              return PropType(39, uint16_t.max, 0);//+10
-		case IP_CONST_WS_SHIELD_BONUS_VIG_PLUS7:                return PropType(41, 1,            7);
-		case IP_CONST_WS_SHIELD_BONUS_VOL_PLUS7:                return PropType(41, 2,            7);
-		case IP_CONST_WS_SHIELD_BONUS_REF_PLUS7:                return PropType(41, 3,            7);
-		case IP_CONST_WS_KEEN:                                  return PropType(43);
-		case IP_CONST_WS_MIGHTY_5:                              return PropType(45, uint16_t.max, 5);
-		case IP_CONST_WS_MIGHTY_10:                             return PropType(45, uint16_t.max, 10);
-		case IP_CONST_WS_REGENERATION:                          return PropType(51, uint16_t.max, 1);
-		case IP_CONST_WS_BOOTS_REGENERATION1:                   return PropType(51, uint16_t.max, 1);
-		case IP_CONST_WS_SHIELD_REGENERATION1:                  return PropType(51, uint16_t.max, 1);
-		case IP_CONST_WS_AMULET_SKILL_CONCENTRATION_BONUS15:    return PropType(52, 1,            15);
-		case IP_CONST_WS_AMULET_SKILL_DISABLE_TRAP_BONUS15:     return PropType(52, 2,            15);
-		case IP_CONST_WS_AMULET_SKILL_DISCIPLINE_BONUS15:       return PropType(52, 3,            15);
-		case IP_CONST_WS_AMULET_SKILL_HEAL_BONUS15:             return PropType(52, 4,            15);
-		case IP_CONST_WS_AMULET_SKILL_HIDE_BONUS15:             return PropType(52, 5,            15);
-		case IP_CONST_WS_AMULET_SKILL_LISTEN_BONUS15:           return PropType(52, 6,            15);
-		case IP_CONST_WS_AMULET_SKILL_LORE_BONUS15:             return PropType(52, 7,            15);
-		case IP_CONST_WS_AMULET_SKILL_MOVE_SILENTLY_BONUS15:    return PropType(52, 8,            15);
-		case IP_CONST_WS_AMULET_SKILL_OPEN_LOCK_BONUS15:        return PropType(52, 9,            15);
-		case IP_CONST_WS_AMULET_SKILL_PARRY_BONUS15:            return PropType(52, 10,           15);
-		case IP_CONST_WS_AMULET_SKILL_PERFORM_BONUS15:          return PropType(52, 11,           15);
-		case IP_CONST_WS_AMULET_SKILL_DIPLOMACY_BONUS15:        return PropType(52, 12,           15);
-		case IP_CONST_WS_AMULET_SKILL_PERSUADE_BONUS15:         return PropType(52, 12,           15);//Diplomacy
-		case IP_CONST_WS_AMULET_SKILL_SLEIGHT_OF_HAND_BONUS15:  return PropType(52, 13,           15);
-		case IP_CONST_WS_AMULET_SKILL_PICK_POCKET_BONUS15:      return PropType(52, 13,           15);//SleightOfHand
-		case IP_CONST_WS_AMULET_SKILL_SEARCH_BONUS15:           return PropType(52, 14,           15);
-		case IP_CONST_WS_AMULET_SKILL_SET_TRAP_BONUS15:         return PropType(52, 15,           15);
-		case IP_CONST_WS_AMULET_SKILL_SPELLCRAFT_BONUS15:       return PropType(52, 16,           15);
-		case IP_CONST_WS_AMULET_SKILL_SPOT_BONUS15:             return PropType(52, 17,           15);
-		case IP_CONST_WS_AMULET_SKILL_TAUNT_BONUS15:            return PropType(52, 18,           15);
-		case IP_CONST_WS_AMULET_SKILL_USE_MAGIC_DEVICE_BONUS15: return PropType(52, 19,           15);
-		case IP_CONST_WS_AMULET_SKILL_APPRAISE_BONUS15:         return PropType(52, 20,           15);
-		case IP_CONST_WS_AMULET_SKILL_TUMBLE_BONUS15:           return PropType(52, 21,           15);
-		case IP_CONST_WS_AMULET_SKILL_CRAFT_TRAP_BONUS15:       return PropType(52, 22,           15);
-		case IP_CONST_WS_AMULET_SKILL_BLUFF_BONUS15:            return PropType(52, 23,           15);
-		case IP_CONST_WS_AMULET_SKILL_INTIMIDATE_BONUS15:       return PropType(52, 24,           15);
-		case IP_CONST_WS_AMULET_SKILL_CRAFT_ARMOR_BONUS15:      return PropType(52, 25,           15);
-		case IP_CONST_WS_AMULET_SKILL_CRAFT_WEAPON_BONUS15:     return PropType(52, 26,           15);
-		case IP_CONST_WS_AMULET_SKILL_CRAFT_ALCHEMY_BONUS15:    return PropType(52, 27,           15);
-		case IP_CONST_WS_AMULET_SKILL_SURVIVAL_BONUS15:         return PropType(52, 29,           15);
-		case IP_CONST_WS_ATTACK_BONUS:                          return PropType(56, uint16_t.max, 1);
-		case IP_CONST_WS_UNLIMITED_3:
+	final switch(enchantType) with(EnchantmentId){
+		case DAMAGETYPE_ACID:
+		case DAMAGETYPE_FIRE:
+		case DAMAGETYPE_COLD:
+		case DAMAGETYPE_ELECTRICAL:
+		case DAMAGETYPE_NEGATIVE:
+		case DAMAGETYPE_POSITIVE:
+		case DAMAGETYPE_DIVINE:                     return PropType(16, enchantType,  7);//7 is for 1d6
+		case ARMOR_STRENGTH_BONUS2:                 return PropType(0,  0,            2);
+		case ARMOR_DEXTERITY_BONUS2:                return PropType(0,  1,            2);
+		case ARMOR_CONSTITUTION_BONUS2:             return PropType(0,  2,            2);
+		case ARMOR_INTELLIGENCE_BONUS2:             return PropType(0,  3,            2);
+		case ARMOR_WISDOM_BONUS2:                   return PropType(0,  4,            2);
+		case ARMOR_CHARISMA_BONUS2:                 return PropType(0,  5,            2);
+		case BRACERS_BELT_STRENGTH_BONUS2:          return PropType(0,  0,            2);
+		case BRACERS_BELT_DEXTERITY_BONUS2:         return PropType(0,  1,            2);
+		case BRACERS_BELT_CONSTITUTION_BONUS2:      return PropType(0,  2,            2);
+		case BRACERS_BELT_INTELLIGENCE_BONUS2:      return PropType(0,  3,            2);
+		case BRACERS_BELT_WISDOM_BONUS2:            return PropType(0,  4,            2);
+		case BRACERS_BELT_CHARISMA_BONUS2:          return PropType(0,  5,            2);
+		case HELM_STRENGTH_BONUS2:                  return PropType(0,  0,            2);
+		case HELM_DEXTERITY_BONUS2:                 return PropType(0,  1,            2);
+		case HELM_CONSTITUTION_BONUS2:              return PropType(0,  2,            2);
+		case HELM_INTELLIGENCE_BONUS2:              return PropType(0,  3,            2);
+		case HELM_WISDOM_BONUS2:                    return PropType(0,  4,            2);
+		case HELM_CHARISMA_BONUS2:                  return PropType(0,  5,            2);
+		case AMULET_STRENGTH_BONUS2:                return PropType(0,  0,            2);
+		case AMULET_DEXTERITY_BONUS2:               return PropType(0,  1,            2);
+		case AMULET_CONSTITUTION_BONUS2:            return PropType(0,  2,            2);
+		case AMULET_INTELLIGENCE_BONUS2:            return PropType(0,  3,            2);
+		case AMULET_WISDOM_BONUS2:                  return PropType(0,  4,            2);
+		case AMULET_CHARISMA_BONUS2:                return PropType(0,  5,            2);
+		case RING_STRENGTH_BONUS2:                  return PropType(0,  0,            2);
+		case RING_DEXTERITY_BONUS2:                 return PropType(0,  1,            2);
+		case RING_CONSTITUTION_BONUS2:              return PropType(0,  2,            2);
+		case RING_INTELLIGENCE_BONUS2:              return PropType(0,  3,            2);
+		case RING_WISDOM_BONUS2:                    return PropType(0,  4,            2);
+		case RING_CHARISMA_BONUS2:                  return PropType(0,  5,            2);
+		case BOOTS_STRENGTH_BONUS2:                 return PropType(0,  0,            2);
+		case BOOTS_DEXTERITY_BONUS2:                return PropType(0,  1,            2);
+		case BOOTS_CONSTITUTION_BONUS2:             return PropType(0,  2,            2);
+		case BOOTS_INTELLIGENCE_BONUS2:             return PropType(0,  3,            2);
+		case BOOTS_WISDOM_BONUS2:                   return PropType(0,  4,            2);
+		case BOOTS_CHARISMA_BONUS2:                 return PropType(0,  5,            2);
+		case CLOAK_STRENGTH_BONUS2:                 return PropType(0,  0,            2);
+		case CLOAK_DEXTERITY_BONUS2:                return PropType(0,  1,            2);
+		case CLOAK_CONSTITUTION_BONUS2:             return PropType(0,  2,            2);
+		case CLOAK_INTELLIGENCE_BONUS2:             return PropType(0,  3,            2);
+		case CLOAK_WISDOM_BONUS2:                   return PropType(0,  4,            2);
+		case CLOAK_CHARISMA_BONUS2:                 return PropType(0,  5,            2);
+		case SHIELD_STRENGTH_BONUS2:                return PropType(0,  0,            2);
+		case SHIELD_DEXTERITY_BONUS2:               return PropType(0,  1,            2);
+		case SHIELD_CONSTITUTION_BONUS2:            return PropType(0,  2,            2);
+		case SHIELD_INTELLIGENCE_BONUS2:            return PropType(0,  3,            2);
+		case SHIELD_WISDOM_BONUS2:                  return PropType(0,  4,            2);
+		case SHIELD_CHARISMA_BONUS2:                return PropType(0,  5,            2);
+		case ARMOR_BONUS_CA2:                       return PropType(1,  uint16_t.max, 2);
+		case CLOAK_PARADE_BONUS2:                   return PropType(1,  uint16_t.max, 2);
+		case BRACERS_BELT_CA_VS_BLUDGEONING_BONUS5: return PropType(3,  0,            5);
+		case BRACERS_BELT_CA_VS_PIERCING_BONUS5:    return PropType(3,  1,            5);
+		case BRACERS_BELT_CA_VS_SLASHING_BONUS5:    return PropType(3,  2,            5);
+		case ENHANCEMENT_BONUS:                     return PropType(6,  uint16_t.max, 1);
+		case HELM_DAMAGERESISTANCE5_BLUDGEONING:    return PropType(23, 0,            5);
+		case HELM_DAMAGERESISTANCE5_PIERCING:       return PropType(23, 1,            5);
+		case HELM_DAMAGERESISTANCE5_SLASHING:       return PropType(23, 2,            5);
+		case HELM_DAMAGERESISTANCE5_MAGICAL:        return PropType(23, 5,            5);
+		case HELM_DAMAGERESISTANCE5_ACID:           return PropType(23, 6,            5);
+		case HELM_DAMAGERESISTANCE5_COLD:           return PropType(23, 7,            5);
+		case HELM_DAMAGERESISTANCE5_DIVINE:         return PropType(23, 8,            5);
+		case HELM_DAMAGERESISTANCE5_ELECTRICAL:     return PropType(23, 9,            5);
+		case HELM_DAMAGERESISTANCE5_FIRE:           return PropType(23, 10,           5);
+		case HELM_DAMAGERESISTANCE5_NEGATIVE:       return PropType(23, 11,           5);
+		case HELM_DAMAGERESISTANCE5_POSITIVE:       return PropType(23, 12,           5);
+		case HELM_DAMAGERESISTANCE5_SONIC:          return PropType(23, 13,           5);
+		case BOOTS_DARKVISION:                      return PropType(26);
+		case HASTE:                                 return PropType(35);
+		case RING_IMMUNE_ABSORBTION:                return PropType(37, 1);
+		case RING_IMMUNE_TERROR:                    return PropType(37, 5);
+		case RING_IMMUNE_DEATH:                     return PropType(37, 9);
+		case SPELLRESISTANCE:                       return PropType(39, uint16_t.max, 0);//+10
+		case SHIELD_SPELLRESISTANCE10:              return PropType(39, uint16_t.max, 0);//+10
+		case SHIELD_BONUS_VIG_PLUS7:                return PropType(41, 1,            7);
+		case SHIELD_BONUS_VOL_PLUS7:                return PropType(41, 2,            7);
+		case SHIELD_BONUS_REF_PLUS7:                return PropType(41, 3,            7);
+		case KEEN:                                  return PropType(43);
+		case MIGHTY_5:                              return PropType(45, uint16_t.max, 5);
+		case MIGHTY_10:                             return PropType(45, uint16_t.max, 10);
+		case REGENERATION:                          return PropType(51, uint16_t.max, 1);
+		case BOOTS_REGENERATION1:                   return PropType(51, uint16_t.max, 1);
+		case SHIELD_REGENERATION1:                  return PropType(51, uint16_t.max, 1);
+		case AMULET_SKILL_CONCENTRATION_BONUS15:    return PropType(52, 1,            15);
+		case AMULET_SKILL_DISABLE_TRAP_BONUS15:     return PropType(52, 2,            15);
+		case AMULET_SKILL_DISCIPLINE_BONUS15:       return PropType(52, 3,            15);
+		case AMULET_SKILL_HEAL_BONUS15:             return PropType(52, 4,            15);
+		case AMULET_SKILL_HIDE_BONUS15:             return PropType(52, 5,            15);
+		case AMULET_SKILL_LISTEN_BONUS15:           return PropType(52, 6,            15);
+		case AMULET_SKILL_LORE_BONUS15:             return PropType(52, 7,            15);
+		case AMULET_SKILL_MOVE_SILENTLY_BONUS15:    return PropType(52, 8,            15);
+		case AMULET_SKILL_OPEN_LOCK_BONUS15:        return PropType(52, 9,            15);
+		case AMULET_SKILL_PARRY_BONUS15:            return PropType(52, 10,           15);
+		case AMULET_SKILL_PERFORM_BONUS15:          return PropType(52, 11,           15);
+		case AMULET_SKILL_DIPLOMACY_BONUS15:        return PropType(52, 12,           15);
+		case AMULET_SKILL_PERSUADE_BONUS15:         return PropType(52, 12,           15);//Diplomacy
+		case AMULET_SKILL_SLEIGHT_OF_HAND_BONUS15:  return PropType(52, 13,           15);
+		case AMULET_SKILL_PICK_POCKET_BONUS15:      return PropType(52, 13,           15);//SleightOfHand
+		case AMULET_SKILL_SEARCH_BONUS15:           return PropType(52, 14,           15);
+		case AMULET_SKILL_SET_TRAP_BONUS15:         return PropType(52, 15,           15);
+		case AMULET_SKILL_SPELLCRAFT_BONUS15:       return PropType(52, 16,           15);
+		case AMULET_SKILL_SPOT_BONUS15:             return PropType(52, 17,           15);
+		case AMULET_SKILL_TAUNT_BONUS15:            return PropType(52, 18,           15);
+		case AMULET_SKILL_USE_MAGIC_DEVICE_BONUS15: return PropType(52, 19,           15);
+		case AMULET_SKILL_APPRAISE_BONUS15:         return PropType(52, 20,           15);
+		case AMULET_SKILL_TUMBLE_BONUS15:           return PropType(52, 21,           15);
+		case AMULET_SKILL_CRAFT_TRAP_BONUS15:       return PropType(52, 22,           15);
+		case AMULET_SKILL_BLUFF_BONUS15:            return PropType(52, 23,           15);
+		case AMULET_SKILL_INTIMIDATE_BONUS15:       return PropType(52, 24,           15);
+		case AMULET_SKILL_CRAFT_ARMOR_BONUS15:      return PropType(52, 25,           15);
+		case AMULET_SKILL_CRAFT_WEAPON_BONUS15:     return PropType(52, 26,           15);
+		case AMULET_SKILL_CRAFT_ALCHEMY_BONUS15:    return PropType(52, 27,           15);
+		case AMULET_SKILL_SURVIVAL_BONUS15:         return PropType(52, 29,           15);
+		case ATTACK_BONUS:                          return PropType(56, uint16_t.max, 1);
+		case UNLIMITED_3:
 			switch(baseItemType){
-				case 8,11:                                      return PropType(61, 0,            15);//Bow
-				case 6,7:                                       return PropType(61, 1,            15);//XBow
-				case 61:                                        return PropType(61, 2,            15);//Sling
+				case 8,11:                          return PropType(61, 0,            15);//Bow
+				case 6,7:                           return PropType(61, 1,            15);//XBow
+				case 61:                            return PropType(61, 2,            15);//Sling
 				default: throw new EnchantmentException("Cannot add Unlimited enchantment to item type "~baseItemType.to!string);
 			}
-		case IP_CONST_WS_TRUESEEING:                            return PropType(71);
-		case IP_CONST_WS_RING_FREEACTION:                       return PropType(75);
-		case IP_CONST_WS_ARMOR_FREEACTION:                      return PropType(75);
-		default: assert(0, "Unknown enchantType "~enchantType.to!string);
+		case TRUESEEING:                            return PropType(71);
+		case RING_FREEACTION:                       return PropType(75);
+		case ARMOR_FREEACTION:                      return PropType(75);
 	}
 }
 
