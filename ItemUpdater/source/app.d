@@ -46,6 +46,7 @@ int main(string[] args){
 	string vaultOvr;
 	string tempOvr;
 	string[string] updateMapPaths;
+	string[] updateBlueprintPaths;
 	bool noninteractive = false;
 	uint parallelJobs = 1;
 	bool skipVault = false;
@@ -54,10 +55,14 @@ int main(string[] args){
 	//Parse cmd line
 	try{
 		enum updateHelp =
-			 "Tag of the item with the updated blueprint.\n"
+			 "Tag of the item + the updated blueprint.\n"
 			 ~"The item blueprint can be a path to any UTI file or the resource name of an item on LcdaDev (without the .uti extension).\n"
 			 ~"Can be specified multiple times.\n"
 			 ~"Example: --update ITEMTAG=itemresref&ITEMTAG2=itemresref2";
+		enum bpupdateHelp =
+			 "Array of bluprints to update."
+			~" Similar to update, but tag will be detected from the blueprint.\n"
+			~"Example: --bpupdate itemresref1&itemresref2&itemresref3";
 		enum policyHelp =
 			 "Policy for overriding/keeping properties and local vars values of each updated item."
 			~" You can override/keep local variables using 'Var.$var_name:$policy'."
@@ -74,6 +79,7 @@ int main(string[] args){
 			"vault", "Vault containing all character bic files to update.\nDefault: $path_nwn2docs/servervault", &vaultOvr,
 			"temp", "Temp folder for storing modified files installing them, and also backup files.\nDefault: $path_nwn2docs/itemupdater_tmp", &tempOvr,
 			required,"update", updateHelp, &updateMapPaths,
+			required,"bpupdate", bpupdateHelp, &updateBlueprintPaths,
 			"policy", policyHelp, &updatePolicy,
 			"skip-vault", "Do not update the servervault", &skipVault,
 			"skip-sql", "Do not update the items in the SQL db (coffreibee, casieribee)", &skipSql,
@@ -107,10 +113,21 @@ int main(string[] args){
 	//Parse blueprints
 	Gff[string] updateMap;
 	foreach(k, v ; updateMapPaths){
+		enforce(k !in updateMap, "Tag '"~k~"' is already assigned to a blueprint");
 		if(v.extension !is null)
 			updateMap[k] = new Gff(v);
 		else
 			updateMap[k] = new Gff(buildPath(LcdaConfig["path_lcdadev"], v~".uti"));
+	}
+	foreach(v ; updateBlueprintPaths){
+		Gff bp;
+		if(v.extension !is null)
+			bp = new Gff(v);
+		else
+			bp = new Gff(buildPath(LcdaConfig["path_lcdadev"], v~".uti"));
+		immutable tag = bp["Tag"].as!GffExoString;
+		enforce(tag !in updateMap, "Tag '"~tag~"' is already assigned to a blueprint");
+		updateMap[tag] = bp;
 	}
 
 
