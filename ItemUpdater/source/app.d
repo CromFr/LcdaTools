@@ -40,47 +40,69 @@ enum UpdatePolicy{
 
 alias ItemPolicy = UpdatePolicy[string];
 ItemPolicy[string] updatePolicy;
-// --policy ItemTag="Cursed=Override,Plot=Keep,Var.bIntelligent=Override"
+
+//--update 'item_resref=>item_blueprint("Cursed":Keep, "Var.bIntelligent=Override")'
+//--update-tag 'item_resref=>item_blueprint("Cursed":Keep, "Var.bIntelligent=Override")'
 
 int main(string[] args){
 	string vaultOvr;
 	string tempOvr;
-	string[string] updateMapPaths;
-	string[] updateBlueprintPaths;
 	bool noninteractive = false;
 	uint parallelJobs = 1;
 	bool skipVault = false;
 	bool skipSql = false;
 
+	alias BlueprintUpdateDef = Tuple!(string,"from", string,"blueprint", UpdatePolicy[string],"policy");
+	BlueprintUpdateDef[] resrefupdateDef;
+	BlueprintUpdateDef[] tagupdateDef;
+
+
 	//Parse cmd line
 	try{
-		enum updateHelp =
-			 "Tag of the item + the updated blueprint.\n"
-			 ~"The item blueprint can be a path to any UTI file or the resource name of an item on LcdaDev (without the .uti extension).\n"
-			 ~"Can be specified multiple times.\n"
-			 ~"Example: --update ITEMTAG=itemresref&ITEMTAG2=itemresref2";
-		enum bpupdateHelp =
-			 "Array of bluprints to update."
-			~" Similar to update, but tag will be detected from the blueprint.\n"
-			~"Example: --bpupdate itemresref1&itemresref2&itemresref3";
-		enum policyHelp =
-			 "Policy for overriding/keeping properties and local vars values of each updated item."
-			~" You can override/keep local variables using 'Var.$var_name:$policy'."
-			~" Can be specified multiple times'\n"
-			~"Setting a local variable that does not exist in the blueprint to Override will delete it from the item.\n"
-			~"Default: Override for properties, Keep for local vars\n"
-			~"Example properties: 'Cursed', 'Plot'\n"
-			~"Example: --policy ITEMTAG='[\"Cursed\":Keep,\"Var.bIntelligent\":Override]'";
+		void parseUpdateArg(string param, string arg){
+			import std.regex: ctRegex, matchFirst;
+			enum rgx = ctRegex!r"^(?:(.+)=)?(.+?)(?:\(([^\(]*)\))?$";
 
+			foreach(ref s ; arg.split("+")){
+				auto cap = s.matchFirst(rgx);
+				enforce(!cap.empty, "Wrong --update format for: '"~s~"'");
+
+				string from = cap[1];
+				string blueprint = cap[2];
+				auto policy = ("["~cap[3]~"]").to!(ItemPolicy);
+
+				if(param=="update"){
+					resrefupdateDef ~= BlueprintUpdateDef(from, blueprint, policy);
+				}
+				else if(param=="update-tag"){
+					tagupdateDef ~= BlueprintUpdateDef(from, blueprint, policy);
+				}
+				else assert(0);
+			}
+		}
+
+		enum prgHelp =
+			 "Update items in bic files & sql db\n"
+			~"\n"
+			~"Tokens:\n"
+			~"- identifier: String used to detect is the item needs to be updated. Can be a resref or a tag (see below)\n"
+			~"- blueprint: Path of an UTI file, or resource name in LcdaDev\n"
+			~"- policy: associative array of properties to keep/override\n"
+			~"    Ex: (\"Cursed\":Keep, \"Var.bIntelligent\":Override)";
+		enum updateHelp =
+			 "Update an item using its TemplateResRef property as identifier.\n"
+			~"The format is: identifier=blueprint(policy)\n"
+			~"identifier & policy are optional\n"
+			~"Can be specified multiple times, separated by the character '+'\n"
+			~"Ex: --update myresref=myblueprint\n"
+			~"    --update myblueprint(\"Cursed\":Keep)";
 
 		auto res = LcdaConfig.init(args);
-		arraySep = "&";
 		res.options ~= getopt(args,
 			"vault", "Vault containing all character bic files to update.\nDefault: $path_nwn2docs/servervault", &vaultOvr,
 			"temp", "Temp folder for storing modified files installing them, and also backup files.\nDefault: $path_nwn2docs/itemupdater_tmp", &tempOvr,
-			required,"update", updateHelp, &updateMapPaths,
-			required,"bpupdate", bpupdateHelp, &updateBlueprintPaths,
-			"policy", policyHelp, &updatePolicy,
+			"update", updateHelp, &parseUpdateArg,
+			"update-tag", "Similar to --update, but using the Tag property as identifier.", &parseUpdateArg,
 			"skip-vault", "Do not update the servervault", &skipVault,
 			"skip-sql", "Do not update the items in the SQL db (coffreibee, casieribee)", &skipSql,
 			"y|y", "Do not prompt and accept everything", &noninteractive,
@@ -89,7 +111,7 @@ int main(string[] args){
 
 		if(res.helpWanted){
 			improvedGetoptPrinter(
-				"Update items in bic files & sql db",
+				prgHelp,
 				res.options);
 			return 0;
 		}
@@ -102,48 +124,75 @@ int main(string[] args){
 		return 1;
 	}
 
-
-
 	//paths
 	immutable vault = vaultOvr !is null? vaultOvr : buildPath(LcdaConfig["path_nwn2docs"], "servervault");
 	enforce(vault.exists && vault.isDir, "Vault is not a directory/does not exist");
 	immutable temp = tempOvr !is null? tempOvr : buildPath(LcdaConfig["path_nwn2docs"], "itemupdater_tmp");
 
 
-	//Parse blueprints
-	Gff[string] updateMap;
-	foreach(k, v ; updateMapPaths){
-		enforce(k !in updateMap, "Tag '"~k~"' is already assigned to a blueprint");
-		if(v.extension !is null)
-			updateMap[k] = new Gff(v);
-		else
-			updateMap[k] = new Gff(buildPath(LcdaConfig["path_lcdadev"], v~".uti"));
+	alias UpdateTarget = Tuple!(Gff,"gff", ItemPolicy,"policy");
+	UpdateTarget[string] updateResref;
+	UpdateTarget[string] updateTag;
+
+	foreach(ref bpu ; resrefupdateDef){
+		auto bpPath = bpu.blueprint.extension is null?
+			buildPath(LcdaConfig["path_lcdadev"], bpu.blueprint~".uti") : bpu.blueprint;
+		auto gff = new Gff(bpPath);
+
+		if(bpu.from !is null && bpu.from.length>0){
+			enforce(bpu.from !in updateResref,
+				"Template resref '"~bpu.from~"' already registered. Cannot add blueprint '"~bpu.blueprint~"'");
+			updateResref[bpu.from] = UpdateTarget(gff, bpu.policy);
+		}
+		else{
+			immutable tplResref = gff["TemplateResRef"].as!(GffType.ResRef);
+			enforce(tplResref !in updateResref,
+				"Template resref '"~tplResref~"' already registered. Cannot add blueprint '"~bpu.blueprint~"'");
+			updateResref[tplResref] = UpdateTarget(gff, bpu.policy);
+		}
 	}
-	foreach(v ; updateBlueprintPaths){
-		Gff bp;
-		if(v.extension !is null)
-			bp = new Gff(v);
-		else
-			bp = new Gff(buildPath(LcdaConfig["path_lcdadev"], v~".uti"));
-		immutable tag = bp["Tag"].as!GffExoString;
-		enforce(tag !in updateMap, "Tag '"~tag~"' is already assigned to a blueprint");
-		updateMap[tag] = bp;
+	foreach(ref bpu ; tagupdateDef){
+		auto bpPath = bpu.blueprint.extension is null?
+			buildPath(LcdaConfig["path_lcdadev"], bpu.blueprint~".uti") : bpu.blueprint;
+		auto gff = new Gff(bpPath);
+
+		if(bpu.from !is null && bpu.from.length>0){
+			enforce(bpu.from !in updateTag,
+				"Tag '"~bpu.from~"' already registered. Cannot add blueprint '"~bpu.blueprint~"'");
+			updateTag[bpu.from] = UpdateTarget(gff, bpu.policy);
+		}
+		else{
+			immutable tag = gff["Tag"].as!(GffType.ResRef);
+			enforce(tag !in updateTag,
+				"Tag '"~tag~"' already registered. Cannot add blueprint '"~bpu.blueprint~"'");
+			updateTag[tag] = UpdateTarget(gff, bpu.policy);
+		}
 	}
+
+	enforce(updateResref.length>0 || updateTag.length>0,
+		"Nothing to update. Use --update or --update-tag");
+
+
+
+
 
 
 	StopWatch bench;
 	auto taskPool = new TaskPool(parallelJobs-1);
 	scope(exit) taskPool.finish;
-	auto conn = new Connection(
+	auto conn = skipSql? null : new Connection(
 		LcdaConfig["sql_address"],
 		LcdaConfig["sql_user"],
 		LcdaConfig["sql_password"],
 		LcdaConfig["sql_schema"]);
-	scope(exit) conn.close();
+	scope(exit){
+		if(!skipSql)
+			conn.close();
+	}
 
 	if(temp.exists){
 		if(noninteractive==false && !temp.dirEntries(SpanMode.shallow).empty){
-			stderr.writeln("WARNING: '",temp,"' is not empty and may contain backups from previous item updates");
+			stderr.writeln("\x1b[1;31mWARNING: '",temp,"' is not empty and may contain backups from previous item updates\x1b[m");
 			writeln();
 			write("'d' to delete content and continue: ");
 			stdout.flush();
@@ -167,23 +216,27 @@ int main(string[] args){
 
 		bench.start;
 		foreach(charFile ; taskPool.parallel(vault.dirEntries("*.bic", SpanMode.depth))){
+			immutable charPathRelative = charFile.relativePath(vault);
+
 			bool charUpdated = false;
 			uint refund = 0;
 			int[string] updatedItemStats;
 
-			void updateSingleItem(ref GffNode item){
-				immutable tag = item["Tag"].to!string;
-				assert(tag in updateMap);
+			void updateSingleItem(string UpdateMethod)(ref GffNode item, in UpdateTarget target){
+				static if(UpdateMethod=="tag")
+					auto identifier = item["Tag"].to!string;
+				else static if(UpdateMethod=="resref")
+					auto identifier = item["TemplateResRef"].to!string;
+				else static assert(0);
 
-				charUpdated = true;
-				if(auto cnt = tag in updatedItemStats)
+
+				if(auto cnt = identifier in updatedItemStats)
 					(*cnt)++;
 				else
-					updatedItemStats[tag] = 1;
+					updatedItemStats[identifier] = 1;
 
-
-				auto policy = tag in updatePolicy;
-				auto update = item.updateItem(updateMap[tag], policy? *policy : null, charFile.relativePath(vault));
+				charUpdated = true;
+				auto update = item.updateItem(target.gff, target.policy, charFile.relativePath(vault));
 
 				refund += update.refund;
 				item = update.item;
@@ -193,9 +246,13 @@ int main(string[] args){
 				assert("ItemList" in container.as!(GffType.Struct));
 
 				foreach(ref item ; container["ItemList"].as!GffList){
-					if(item["Tag"].to!string in updateMap){
-						updateSingleItem(item);
+					if(auto target = item["TemplateResRef"].to!string in updateResref){
+						updateSingleItem!"resref"(item, *target);
 					}
+					else if(auto target = item["Tag"].to!string in updateTag){
+						updateSingleItem!"tag"(item, *target);
+					}
+
 					if("ItemList" in item.as!(GffType.Struct)){
 						updateInventory(item);
 					}
@@ -204,26 +261,40 @@ int main(string[] args){
 				if("Equip_ItemList" in container.as!(GffType.Struct)){
 					bool[size_t] itemsToRemove;
 					foreach(ref item ; container["Equip_ItemList"].as!GffList){
-						if(item["Tag"].to!string in updateMap){
-							updateSingleItem(item);
 
+						bool u = false;
+						if(auto target = item["TemplateResRef"].to!string in updateResref){
+							updateSingleItem!"resref"(item, *target);
+							u=true;
+						}
+						else if(auto target = item["Tag"].to!string in updateTag){
+							updateSingleItem!"tag"(item, *target);
+							u=true;
+						}
+
+						if(u){
 							itemsToRemove[item.structType] = true;
-
 							if(container["ItemList"].as!GffList.length < 128){
-								//TODO: check if ok if inventory full
 								container["ItemList"].as!GffList ~= item.dup;
 							}
 							else{
 								stderr.writeln(
-									"WARNING: ",charFile," has '",item["Tag"].to!string,"' equipped and no room in inventory to unequip it.",
-									" The character may be refused on login for having an item too powerful for his level.",item.structType);
+									"\x1b[1;31mWARNING: ",charPathRelative," has '",item["Tag"].to!string,"' equipped and no room in inventory to unequip it.",
+									" The character may be refused on login for having an item too powerful for his level.\x1b[m");
 							}
 						}
 					}
 
-					container["Equip_ItemList"].as!GffList.remove!(a=>(a.structType in itemsToRemove) !is null);
+					//container["Equip_ItemList"].as!GffList.remove!(a=>(a.structType in itemsToRemove) !is null);
 
-
+					foreach_reverse(i, ref item ; container["Equip_ItemList"].as!GffList){
+						if(item.structType in itemsToRemove){
+							immutable l = container["Equip_ItemList"].as!GffList.length;
+							container["Equip_ItemList"].as!GffList =
+								container["Equip_ItemList"].as!GffList[0..i]
+								~ (i+1<l? container["Equip_ItemList"].as!GffList[i+1..$] : null);
+						}
+					}
 				}
 			}
 
@@ -231,8 +302,6 @@ int main(string[] args){
 			updateInventory(character);
 
 			if(charUpdated){
-				immutable charPathRelative = charFile.relativePath(vault);
-
 				//Apply refund
 				character["Gold"].as!GffDWord += refund;
 
@@ -293,17 +362,18 @@ int main(string[] args){
 		bench.reset;
 		bench.start;
 		auto res = Command(conn, "SELECT id, account_name, item_data FROM coffreibee").execSQLResult;
-		foreach(row ; taskPool.parallel(res)){
+		foreach(row ; res){
 			auto id = row[0].get!long;
 			auto owner = row[1].get!string;
 			auto itemData = row[2].get!(ubyte[]);
 			auto item = new Gff(itemData);
 
-			immutable tag = item["Tag"].to!string;
-			if(auto blueprint = tag in updateMap){
+			auto target = item["TemplateResRef"].to!string in updateResref;
+			if(!target) target = item["Tag"].to!string in updateTag;
+
+			if(target){
 				//Item will be updated and name will be changed
-				auto policy = tag in updatePolicy;
-				auto update = item.updateItem(*blueprint, policy? *policy : null, "coffreibee["~id.to!string~"]");
+				auto update = item.updateItem(target.gff, target.policy, "coffreibee["~id.to!string~"]");
 
 				item.root = update.item;
 				ubyte[] updatedData = item.serialize();
@@ -327,7 +397,7 @@ int main(string[] args){
 
 				buildPath(coffreIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
 
-				writeln("coffreibee[",id,"] ",tag," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
+				writeln("coffreibee[",id,"] ",update.item["Tag"].to!string," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
 				stdout.flush();
 			}
 
@@ -336,17 +406,18 @@ int main(string[] args){
 		writeln("-----");
 		//CASIERIBEE
 		res = Command(conn, "SELECT id, vendor_account_name, item_data FROM casieribee WHERE active=1").execSQLResult;
-		foreach(row ; taskPool.parallel(res)){
+		foreach(row ; res){
 			auto id = row[0].get!long;
 			auto owner = row[1].get!string;
 			auto itemData = row[2].get!(ubyte[]);
 			auto item = new Gff(itemData);
 
-			immutable tag = item["Tag"].to!string;
-			if(auto blueprint = tag in updateMap){
+			auto target = item["TemplateResRef"].to!string in updateResref;
+			if(!target) target = item["Tag"].to!string in updateTag;
+
+			if(target){
 				//Item will be updated and marked as sold with price = 0gp
-				auto policy = tag in updatePolicy;
-				auto update = item.updateItem(*blueprint, policy? *policy : null, "casieribee["~id.to!string~"]");
+				auto update = item.updateItem(target.gff, target.policy, "casieribee["~id.to!string~"]");
 
 				item.root = update.item;
 				ubyte[] updatedData = item.serialize();
@@ -371,7 +442,7 @@ int main(string[] args){
 
 				buildPath(casierIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
 
-				writeln("casieribee[",id,"] ",tag," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
+				writeln("casieribee[",id,"] ",update.item["Tag"].to!string," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
 				stdout.flush();
 			}
 
@@ -454,7 +525,7 @@ int main(string[] args){
 
 
 ///
-auto updateItem(in GffNode oldItem, in GffNode blueprint, ItemPolicy itemPolicy, lazy string ownerName){
+auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPolicy, lazy string ownerName){
 	bool enchanted = false;
 	EnchantmentId enchantment;
 
@@ -525,8 +596,11 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, ItemPolicy itemPolicy,
 
 		if(name=="DEJA_ENCHANTE")
 			enchanted   = oldItemVar["Value"].to!bool;
-		else if(name=="X2_LAST_PROPERTY")
-			enchantment = oldItemVar["Value"].as!GffInt.to!EnchantmentId;
+		else if(name=="X2_LAST_PROPERTY"){
+			auto val = oldItemVar["Value"].as!GffInt;
+			if(val>0)
+				enchantment = val.to!EnchantmentId;
+		}
 
 		if(auto idx = name in varsInUpdatedItem){
 			//Var is in updatedItem (inherited from blueprint)
@@ -569,9 +643,11 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, ItemPolicy itemPolicy,
 	//Enchantment
 	int refund = 0;
 	if(enchanted){
+		enforce(enchantment>0, "Wrong enchantment ID: "~enchantment.to!string);
+
 		try updatedItem.enchantItem(enchantment);
 		catch(EnchantmentException e){
-			stderr.writeln("WARNING: ",ownerName,":",updatedItem["Tag"].to!string,": ",e.msg, " - Enchantment refunded");
+			stderr.writeln("\x1b[1;31mWARNING: ",ownerName,":",updatedItem["Tag"].to!string,": ",e.msg, " - Enchantment refunded\x1b[m");
 
 			//Refund enchantment
 			refund = PrixDuService(enchantment);
@@ -593,77 +669,6 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, ItemPolicy itemPolicy,
 	return Tuple!(GffNode,"item", int,"refund")(updatedItem, refund);
 }
 
-unittest{
-	with(GffType){
-		void cmpItems(GffType TYPE=Struct)(in GffNode lhs, in GffNode rhs) if(TYPE==Struct || TYPE==List){
-			assert(lhs.type==TYPE && rhs.type==TYPE, "GffNode type mismatch");
-			assert(lhs.as!TYPE.length == rhs.as!TYPE.length, "children length mismatch");
-
-			static if(TYPE==Struct){
-				foreach(ref lhskv ; lhs.as!Struct.byKeyValue){
-					auto rhsv = lhskv.key in rhs.as!Struct;
-					assert(rhsv, "Key '"~lhskv.key~"' is in 'lhs' but not in 'rhs'");
-
-					assert(lhskv.key == lhskv.value.label);
-					assert(lhskv.value.label == lhskv.key);
-					assert(rhsv.label == lhskv.key);
-
-					if(lhskv.key=="LocalizedName") continue;//May change for practical reasons
-					if(lhskv.key=="Tint") continue;//Tint has a bug where color2 is automatically changed to red by the server
-					if(lhskv.key=="LastName") continue;//we dont care
-
-					if(lhskv.value.type == Struct){
-						cmpItems!Struct(lhskv.value, *rhsv);
-					}
-					else if(lhskv.value.type == List){
-						cmpItems!List(lhskv.value, *rhsv);
-					}
-					else{
-						assert(rhsv.toPrettyString == lhskv.value.toPrettyString,
-							"Value mismatch on key '"~lhskv.key~"': "~lhskv.value.toPrettyString~" => "~rhsv.toPrettyString);
-					}
-				}
-			}
-			else static if(TYPE==List){
-				foreach(i, ref lhsv ; lhs.as!List){
-					cmpItems!Struct(lhsv, rhs.as!List[i]);
-				}
-			}
-		}
-
-
-		auto character = new Gff("unittests/aaadebug.bic");
-		//import std.file: writeFile=write;
-		//foreach(i ; 0..6){
-		//	("unittests/instance-"~character["ItemList"][i]["LocalizedName"].to!string~".json").writeFile(character["ItemList"][i].toJson.toString);
-		//	("unittests/instance-"~character["ItemList"][i]["LocalizedName"].to!string~".pretty").writeFile(character["ItemList"][i].toPrettyString);
-		//}
-		//"unittests/blueprint-hacheavatardesglaces--ORIGINAL.UTI.pretty".writeFile(
-		//	new Gff("unittests/blueprint-hacheavatardesglaces--ORIGINAL.UTI").toPrettyString);
-
-		auto bpOriginal = new Gff("unittests/blueprint-hacheavatardesglaces--ORIGINAL.UTI");
-		auto bpBuffed = new Gff("unittests/blueprint-hacheavatardesglaces--ORIGINAL+2ALT.UTI");
-
-		auto from = character["ItemList"][0];
-		auto to = character["ItemList"][0].updateItem(bpOriginal).item;
-
-		cmpItems(from, to);
-
-
-		//import std.algorithm: sort, each;
-		//writeln("==================================== ORIGINAL ITEM");
-		//from.as!Struct.byKeyValue.dup.sort!"a.key < b.key".each!((a){writeln(a.key, "=", a.value.to!string, a.key in to.as!Struct? "" : "     <<<<<<<<<<<<<<<<");});
-		//writeln("==================================== UPDATED ITEM");
-		//to.as!Struct.byKeyValue.dup.sort!"a.key < b.key".each!((a){writeln(a.key, "=", a.value.to!string, a.key in from.as!Struct? "" : "     <<<<<<<<<<<<<<<<");});
-
-		//to.toPrettyString.writeln();
-
-
-
-
-	}
-
-}
 class EnchantmentException : Exception{
 	@safe pure nothrow this(string msg, string f=__FILE__, size_t l=__LINE__, Throwable t=null){
 		super(msg, f, l, t);
@@ -839,18 +844,18 @@ PropType getPropertyType(uint baseItemType, EnchantmentId enchantType){
 		case BRACERS_BELT_CA_VS_PIERCING_BONUS5:    return PropType(3,  1,            5);
 		case BRACERS_BELT_CA_VS_SLASHING_BONUS5:    return PropType(3,  2,            5);
 		case ENHANCEMENT_BONUS:                     return PropType(6,  uint16_t.max, 1);
-		case HELM_DAMAGERESISTANCE5_BLUDGEONING:    return PropType(23, 0,            5);
-		case HELM_DAMAGERESISTANCE5_PIERCING:       return PropType(23, 1,            5);
-		case HELM_DAMAGERESISTANCE5_SLASHING:       return PropType(23, 2,            5);
-		case HELM_DAMAGERESISTANCE5_MAGICAL:        return PropType(23, 5,            5);
-		case HELM_DAMAGERESISTANCE5_ACID:           return PropType(23, 6,            5);
-		case HELM_DAMAGERESISTANCE5_COLD:           return PropType(23, 7,            5);
-		case HELM_DAMAGERESISTANCE5_DIVINE:         return PropType(23, 8,            5);
-		case HELM_DAMAGERESISTANCE5_ELECTRICAL:     return PropType(23, 9,            5);
-		case HELM_DAMAGERESISTANCE5_FIRE:           return PropType(23, 10,           5);
-		case HELM_DAMAGERESISTANCE5_NEGATIVE:       return PropType(23, 11,           5);
-		case HELM_DAMAGERESISTANCE5_POSITIVE:       return PropType(23, 12,           5);
-		case HELM_DAMAGERESISTANCE5_SONIC:          return PropType(23, 13,           5);
+		case HELM_DAMAGERESISTANCE5_BLUDGEONING:    return PropType(23, 0,            1);
+		case HELM_DAMAGERESISTANCE5_PIERCING:       return PropType(23, 1,            1);
+		case HELM_DAMAGERESISTANCE5_SLASHING:       return PropType(23, 2,            1);
+		case HELM_DAMAGERESISTANCE5_MAGICAL:        return PropType(23, 5,            1);
+		case HELM_DAMAGERESISTANCE5_ACID:           return PropType(23, 6,            1);
+		case HELM_DAMAGERESISTANCE5_COLD:           return PropType(23, 7,            1);
+		case HELM_DAMAGERESISTANCE5_DIVINE:         return PropType(23, 8,            1);
+		case HELM_DAMAGERESISTANCE5_ELECTRICAL:     return PropType(23, 9,            1);
+		case HELM_DAMAGERESISTANCE5_FIRE:           return PropType(23, 10,           1);
+		case HELM_DAMAGERESISTANCE5_NEGATIVE:       return PropType(23, 11,           1);
+		case HELM_DAMAGERESISTANCE5_POSITIVE:       return PropType(23, 12,           1);
+		case HELM_DAMAGERESISTANCE5_SONIC:          return PropType(23, 13,           1);
 		case BOOTS_DARKVISION:                      return PropType(26);
 		case HASTE:                                 return PropType(35);
 		case RING_IMMUNE_ABSORBTION:                return PropType(37, 1);
