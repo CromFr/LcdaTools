@@ -569,6 +569,7 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 		//The item is a container (bag)
 		updatedItem["ItemList"] = oldItem["ItemList"].dup;
 	}
+	updatedItem.structType = oldItem.structType;
 
 	//Fix nwn2 oddities
 	updatedItem["ArmorRulesType"] = GffNode(GffType.Int, "ArmorRulesType", blueprint["ArmorRulesType"].as!GffByte);
