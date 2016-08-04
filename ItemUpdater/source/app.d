@@ -273,8 +273,8 @@ int main(string[] args){
 						}
 
 						if(u){
-							itemsToRemove[item.structType] = true;
 							if(container["ItemList"].as!GffList.length < 128){
+								itemsToRemove[item.structType] = true;
 								container["ItemList"].as!GffList ~= item.dup;
 							}
 							else{
