@@ -364,7 +364,7 @@ int main(string[] args){
 		auto res = Command(conn, "SELECT id, item_name, account_name, item_data FROM coffreibee").execSQLResult;
 		foreach(row ; res){
 			auto id = row[0].get!long;
-			auto itemName = row[1].get!(string[]);
+			auto itemName = row[1].get!string;
 			auto owner = row[2].get!string;
 			auto itemData = row[3].get!(ubyte[]);
 			auto item = new Gff(itemData);
