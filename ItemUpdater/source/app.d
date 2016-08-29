@@ -361,11 +361,12 @@ int main(string[] args){
 		//COFFREIBEE
 		bench.reset;
 		bench.start;
-		auto res = Command(conn, "SELECT id, account_name, item_data FROM coffreibee").execSQLResult;
+		auto res = Command(conn, "SELECT id, item_name, account_name, item_data FROM coffreibee").execSQLResult;
 		foreach(row ; res){
 			auto id = row[0].get!long;
-			auto owner = row[1].get!string;
-			auto itemData = row[2].get!(ubyte[]);
+			auto itemName = row[1].get!(string[]);
+			auto owner = row[2].get!string;
+			auto itemData = row[3].get!(ubyte[]);
 			auto item = new Gff(itemData);
 
 			auto target = item["TemplateResRef"].to!string in updateResref;
@@ -378,11 +379,13 @@ int main(string[] args){
 				item.root = update.item;
 				ubyte[] updatedData = item.serialize();
 
+				bool firstUpdate = itemName.indexOf("<b><c=red>MAJ</c></b>")==-1;
+
 				//Update item data
 				auto cmdUpdate = Command(conn,
 						"UPDATE coffreibee SET"
-							~" item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name),"
-							~" item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description),"
+							~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
+							~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
 							~" item_data=?"
 						~" WHERE id=?");
 				cmdUpdate.prepare;
