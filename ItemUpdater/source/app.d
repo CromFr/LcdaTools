@@ -873,9 +873,9 @@ PropType getPropertyType(uint baseItemType, EnchantmentId enchantType){
 		case KEEN:                                  return PropType(43);
 		case MIGHTY_5:                              return PropType(45, uint16_t.max, 5);
 		case MIGHTY_10:                             return PropType(45, uint16_t.max, 10);
-		case REGENERATION:                          return PropType(51, uint16_t.max, 1);
-		case BOOTS_REGENERATION1:                   return PropType(51, uint16_t.max, 1);
-		case SHIELD_REGENERATION1:                  return PropType(51, uint16_t.max, 1);
+		case REGENERATION:                          return PropType(51, uint16_t.max, 2);
+		case BOOTS_REGENERATION1:                   return PropType(51, uint16_t.max, 2);
+		case SHIELD_REGENERATION1:                  return PropType(51, uint16_t.max, 2);
 		case AMULET_SKILL_CONCENTRATION_BONUS15:    return PropType(52, 1,            15);
 		case AMULET_SKILL_DISABLE_TRAP_BONUS15:     return PropType(52, 2,            15);
 		case AMULET_SKILL_DISCIPLINE_BONUS15:       return PropType(52, 3,            15);
