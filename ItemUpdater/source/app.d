@@ -788,6 +788,7 @@ PropType getPropertyType(uint baseItemType, EnchantmentId enchantType){
 	//Indices are found in itempropdef.2da
 	final switch(enchantType) with(EnchantmentId){
 		case DAMAGETYPE_ACID:
+		case DAMAGETYPE_SONIC:
 		case DAMAGETYPE_FIRE:
 		case DAMAGETYPE_COLD:
 		case DAMAGETYPE_ELECTRICAL:
@@ -848,6 +849,7 @@ PropType getPropertyType(uint baseItemType, EnchantmentId enchantType){
 		case BRACERS_BELT_CA_VS_PIERCING_BONUS5:    return PropType(3,  1,            5);
 		case BRACERS_BELT_CA_VS_SLASHING_BONUS5:    return PropType(3,  2,            5);
 		case ENHANCEMENT_BONUS:                     return PropType(6,  uint16_t.max, 1);
+		case ENHANCEMENT_BONUS2:                    return PropType(6,  uint16_t.max, 2);
 		case HELM_DAMAGERESISTANCE5_BLUDGEONING:    return PropType(23, 0,            1);
 		case HELM_DAMAGERESISTANCE5_PIERCING:       return PropType(23, 1,            1);
 		case HELM_DAMAGERESISTANCE5_SLASHING:       return PropType(23, 2,            1);
@@ -873,6 +875,8 @@ PropType getPropertyType(uint baseItemType, EnchantmentId enchantType){
 		case KEEN:                                  return PropType(43);
 		case MIGHTY_5:                              return PropType(45, uint16_t.max, 5);
 		case MIGHTY_10:                             return PropType(45, uint16_t.max, 10);
+		case MIGHTY_15:                             return PropType(45, uint16_t.max, 15);
+		case MIGHTY_20:                             return PropType(45, uint16_t.max, 20);
 		case REGENERATION:                          return PropType(51, uint16_t.max, 2);
 		case BOOTS_REGENERATION1:                   return PropType(51, uint16_t.max, 2);
 		case SHIELD_REGENERATION1:                  return PropType(51, uint16_t.max, 2);
@@ -907,6 +911,9 @@ PropType getPropertyType(uint baseItemType, EnchantmentId enchantType){
 		case AMULET_SKILL_CRAFT_ALCHEMY_BONUS15:    return PropType(52, 27,           15);
 		case AMULET_SKILL_SURVIVAL_BONUS15:         return PropType(52, 29,           15);
 		case ATTACK_BONUS:                          return PropType(56, uint16_t.max, 1);
+		case ATTACK_BONUS2:                         return PropType(56, uint16_t.max, 2);
+		case ATTACK_BONUS3:                         return PropType(56, uint16_t.max, 3);
+		case ATTACK_BONUS4:                         return PropType(56, uint16_t.max, 4);
 		case UNLIMITED_3:
 			switch(baseItemType){
 				case 8,11:                          return PropType(61, 0,            15);//Bow

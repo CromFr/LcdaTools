@@ -13,6 +13,7 @@ mixin((){
 			}
 		}
 		ret ~= `DAMAGETYPE_ACID       = IP_CONST_DAMAGETYPE_ACID,`;
+		ret ~= `DAMAGETYPE_SONIC      = IP_CONST_DAMAGETYPE_SONIC,`;
 		ret ~= `DAMAGETYPE_FIRE       = IP_CONST_DAMAGETYPE_FIRE,`;
 		ret ~= `DAMAGETYPE_COLD       = IP_CONST_DAMAGETYPE_COLD,`;
 		ret ~= `DAMAGETYPE_ELECTRICAL = IP_CONST_DAMAGETYPE_ELECTRICAL,`;
@@ -32,26 +33,31 @@ mixin((){
 
 const int WS_COST_ACID_PROPERTY = 300000; // All elemental damages use this.
 const int WS_COST_ATTACK_BONUS = 100000;
+const int WS_COST_ATTACK_BONUS2 = 200000;
+const int WS_COST_ATTACK_BONUS4 = 450000;
 const int WS_COST_ENHANCEMENT_BONUS = 150000;
+const int WS_COST_ENHANCEMENT_BONUS2 = 450000;
 const int WS_COST_HASTE = 300000;
 const int WS_COST_KEEN = 300000;
-const int WS_COST_TRUESEEING = 800000;
+const int WS_COST_TRUESEEING = 450000;
 const int WS_COST_SPELLRESISTANCE = 150000;
-const int WS_COST_REGENERATION2 = 300000;
+const int WS_COST_REGENERATION2 = 450000;
 const int WS_COST_MIGHTY_5 = 100000;
 const int WS_COST_MIGHTY_10 = 300000;
+const int WS_COST_MIGHTY_15 = 400000;
+const int WS_COST_MIGHTY_20 = 500000;
 const int WS_COST_UNLIMITED_3 = 200000;
-const int WS_COST_ARMOR_BONUS_CA2 = 300000;
+const int WS_COST_ARMOR_BONUS_CA2 = 450000;
 const int WS_COST_ARMOR_FREEACTION = 150000;
 const int WS_COST_ARMOR_STAT_BONUS2 = 450000; // All stat bonuses use this.
 const int WS_COST_SHIELD_REGENERATION1 = 150000;
 const int WS_COST_SHIELD_SPELLRESISTANCE10 = 150000;
-const int WS_COST_SHIELD_BONUS_JS7 = 75000; // ALL DD bonuses for shield use this.
+const int WS_COST_SHIELD_BONUS_JS7 = 150000; // ALL DD bonuses for shield use this.
 const int WS_COST_HELM_DAMAGERESISTANCE5 = 300000; // All damage resitances for helm use this.
-const int WS_COST_RING_FREEACTION = 150000 ;
-const int WS_COST_RING_IMMUNE_DEATH = 500000 ;
+const int WS_COST_RING_FREEACTION = 300000 ;
+const int WS_COST_RING_IMMUNE_DEATH = 1000000 ;
 const int WS_COST_RING_IMMUNE_TERROR = 150000 ;
-const int WS_COST_RING_IMMUNE_ABSORBTION = 150000 ;
+const int WS_COST_RING_IMMUNE_ABSORBTION = 300000 ;
 const int WS_COST_AMULET_COMPETENCE_BONUS15 = 350000 ; // All competence bonuses for amulettes use this.
 const int WS_COST_BOOTS_DARKVISION = 75000;
 const int WS_COST_BOOTS_REGENERATION1 = 150000;
@@ -176,6 +182,12 @@ const int IP_CONST_WS_SHIELD_INTELLIGENCE_BONUS2 = 19115;
 const int IP_CONST_WS_SHIELD_STRENGTH_BONUS2 = 19116;
 const int IP_CONST_WS_SHIELD_DEXTERITY_BONUS2 = 19117;
 const int IP_CONST_WS_SHIELD_CHARISMA_BONUS2 = 19118;
+const int IP_CONST_WS_ATTACK_BONUS2 = 19119;
+const int IP_CONST_WS_ATTACK_BONUS3 = 19120;
+const int IP_CONST_WS_ATTACK_BONUS4 = 19121;
+const int IP_CONST_WS_ENHANCEMENT_BONUS2 = 19122;
+const int IP_CONST_WS_MIGHTY_15 = 19123;
+const int IP_CONST_WS_MIGHTY_20 = 19124;
 
 
 
@@ -190,8 +202,9 @@ int PrixDuService(int nService)
 	//SpeakString("Determination du prix");
 	switch (nService)
 		{
-		// ARMES ***************************************************************
+			// ARMES ***************************************************************
 			case IP_CONST_DAMAGETYPE_ACID:
+			case IP_CONST_DAMAGETYPE_SONIC:
 			case IP_CONST_DAMAGETYPE_FIRE:
 			case IP_CONST_DAMAGETYPE_COLD:
 			case IP_CONST_DAMAGETYPE_ELECTRICAL:
@@ -200,9 +213,16 @@ int PrixDuService(int nService)
 			case IP_CONST_DAMAGETYPE_DIVINE:
 				nGoldNeed = WS_COST_ACID_PROPERTY; break;
 			case IP_CONST_WS_ATTACK_BONUS: nGoldNeed = WS_COST_ATTACK_BONUS; break;
+			case IP_CONST_WS_ATTACK_BONUS2: nGoldNeed = WS_COST_ATTACK_BONUS2; break;
+			case IP_CONST_WS_ATTACK_BONUS4: nGoldNeed = WS_COST_ATTACK_BONUS4; break;
 			case IP_CONST_WS_ENHANCEMENT_BONUS:
 			{
 				nGoldNeed = WS_COST_ENHANCEMENT_BONUS;
+				break;
+			}
+			case IP_CONST_WS_ENHANCEMENT_BONUS2:
+			{
+				nGoldNeed = WS_COST_ENHANCEMENT_BONUS2;
 				break;
 			}
 			case IP_CONST_WS_HASTE: nGoldNeed = WS_COST_HASTE; break;
@@ -212,9 +232,11 @@ int PrixDuService(int nService)
 			case IP_CONST_WS_REGENERATION: nGoldNeed = WS_COST_REGENERATION2; break; // utilisé par tous les items d'equipements
 			case IP_CONST_WS_MIGHTY_5: nGoldNeed = WS_COST_MIGHTY_5; break;
 			case IP_CONST_WS_MIGHTY_10: nGoldNeed = WS_COST_MIGHTY_10; break;
+			case IP_CONST_WS_MIGHTY_15: nGoldNeed = WS_COST_MIGHTY_15; break;
+			case IP_CONST_WS_MIGHTY_20: nGoldNeed = WS_COST_MIGHTY_20; break;
 			case IP_CONST_WS_UNLIMITED_3: nGoldNeed = WS_COST_UNLIMITED_3; break;
 		// ARMURES *************************************************************
-			case IP_CONST_WS_ARMOR_BONUS_CA2: nGoldNeed = WS_COST_ARMOR_BONUS_CA2; break;
+			case IP_CONST_WS_ARMOR_BONUS_CA2: nGoldNeed = WS_COST_ARMOR_BONUS_CA2; break; // N&B : utilisé pour bouclier egalement
 			case IP_CONST_WS_ARMOR_FREEACTION: nGoldNeed =WS_COST_ARMOR_FREEACTION; break;
 			case IP_CONST_WS_ARMOR_STRENGTH_BONUS2:
 			case IP_CONST_WS_ARMOR_DEXTERITY_BONUS2:
