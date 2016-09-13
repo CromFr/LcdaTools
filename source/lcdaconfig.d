@@ -4,6 +4,9 @@ import std.getopt;
 import std.conv;
 import std.exception: enforce;
 import std.path: exists;
+import std.string;
+import std.algorithm: removeElmts=remove;
+//import std.array;
 
 class LcdaConfig{
 static shared:
@@ -31,7 +34,16 @@ static shared:
 			else
 				throw new Exception("Could not find config.json");
 		}
-		auto json = parseJSON(configPath.readText);
+
+		auto json = configPath
+			.readText
+			.splitLines
+			.removeElmts!((line){
+				immutable l = line.stripLeft;
+				return l.length>=2 && l[0..2]=="//";
+			})
+			.join
+			.parseJSON;
 
 		foreach(string key, ref value ; json){
 			if(value.type == JSON_TYPE.OBJECT || value.type == JSON_TYPE.ARRAY){
@@ -62,7 +74,6 @@ static shared:
 
 void improvedGetoptPrinter(string text, Option[] opt, int width=80){
 	import std.stdio: writef, writeln;
-	import std.string: wrap, leftJustify, splitLines;
 	import std.algorithm: map, reduce;
 
 	size_t widthOptLong;

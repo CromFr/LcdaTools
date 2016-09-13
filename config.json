@@ -10,6 +10,8 @@
 	"sql_password": "123",
 	"sql_schema": "nwnx",
 
-	"gitlab_token": "xxxxx",
+	"gitlab_token": "TWrXzT-7yoDRF6YYyuWH",
+
+	//LcdaDev: 1534237  test-issues: 1620331
 	"gitlab_lcdadev_projectid": "1620331"
 }
