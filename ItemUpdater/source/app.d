@@ -379,26 +379,32 @@ int main(string[] args){
 				item.root = update.item;
 				ubyte[] updatedData = item.serialize();
 
-				bool firstUpdate = itemName.indexOf("<b><c=red>MAJ</c></b>")==-1;
+				if(itemData == updatedData){
+					writeln("\x1b[1;31mWARNING: Item id=", id, " (resref=", target.gff["TemplateResRef"].to!string, ") did not change after update\x1b[m");
+				}
+				else{
+					bool firstUpdate = itemName.indexOf("<b><c=red>MAJ</c></b>")==-1;
 
-				//Update item data
-				auto cmdUpdate = Command(conn,
-						"UPDATE coffreibee SET"
-							~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
-							~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
-							~" item_data=?"
-						~" WHERE id=?");
-				cmdUpdate.prepare;
-				cmdUpdate.bindParameterTuple(updatedData, id);
-				cmdUpdate.execPrepared(affectedRows);
-				enforce(affectedRows==1, "Wrong number of rows affected by SQL query");
+					//Update item data
+					auto cmdUpdate = Command(conn,
+							"UPDATE coffreibee SET"
+								~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
+								~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
+								~" item_data=?"
+							~" WHERE id=?");
+					cmdUpdate.prepare;
+					cmdUpdate.bindParameterTuple(updatedData, id);
+					cmdUpdate.execPrepared(affectedRows);
+					enforce(affectedRows==1, "Wrong number of rows affected by SQL query: "~affectedRows.to!string~" rows affected for item ID="~id.to!string);
 
-				if(update.refund > 0){
-					//Apply refund in bank
-					refundInBank(owner, update.refund);
+					if(update.refund > 0){
+						//Apply refund in bank
+						refundInBank(owner, update.refund);
+					}
+
+					buildPath(coffreIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
 				}
 
-				buildPath(coffreIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
 
 				writeln("coffreibee[",id,"] ",update.item["Tag"].to!string," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
 				stdout.flush();
@@ -408,11 +414,12 @@ int main(string[] args){
 		}
 		writeln("-----");
 		//CASIERIBEE
-		res = Command(conn, "SELECT id, vendor_account_name, item_data FROM casieribee WHERE active=1").execSQLResult;
+		res = Command(conn, "SELECT id, item_name, vendor_account_name, item_data FROM casieribee WHERE active=1").execSQLResult;
 		foreach(row ; res){
 			auto id = row[0].get!long;
-			auto owner = row[1].get!string;
-			auto itemData = row[2].get!(ubyte[]);
+			auto itemName = row[1].get!string;
+			auto owner = row[2].get!string;
+			auto itemData = row[3].get!(ubyte[]);
 			auto item = new Gff(itemData);
 
 			auto target = item["TemplateResRef"].to!string in updateResref;
@@ -425,25 +432,32 @@ int main(string[] args){
 				item.root = update.item;
 				ubyte[] updatedData = item.serialize();
 
-				//Update item data
-				auto cmdUpdate = Command(conn,
-						"UPDATE casieribee SET"
-							~" item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name),"
-							~" item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description),"
-							~" sale_allowed=0,"
-							~" item_data=?"
-						~" WHERE id=?");
-				cmdUpdate.prepare;
-				cmdUpdate.bindParameterTuple(updatedData, id);
-				cmdUpdate.execPrepared(affectedRows);
-				enforce(affectedRows==1, "Wrong number of rows affected by SQL query");
-
-				if(update.refund > 0){
-					//Apply refund in bank
-					refundInBank(owner, update.refund);
+				if(itemData == updatedData){
+					writeln("\x1b[1;31mWARNING: Item id=", id, " (resref=", target.gff["TemplateResRef"].to!string, ") did not change after update\x1b[m");
 				}
+				else{
+					bool firstUpdate = itemName.indexOf("<b><c=red>MAJ</c></b>")==-1;
 
-				buildPath(casierIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
+					//Update item data
+					auto cmdUpdate = Command(conn,
+							"UPDATE casieribee SET"
+								~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
+								~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
+								~" sale_allowed=0,"
+								~" item_data=?"
+							~" WHERE id=?");
+					cmdUpdate.prepare;
+					cmdUpdate.bindParameterTuple(updatedData, id);
+					cmdUpdate.execPrepared(affectedRows);
+					enforce(affectedRows==1, "Wrong number of rows affected by SQL query: "~affectedRows.to!string~" rows affected for item ID="~id.to!string);
+
+					if(update.refund > 0){
+						//Apply refund in bank
+						refundInBank(owner, update.refund);
+					}
+
+					buildPath(casierIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
+				}
 
 				writeln("casieribee[",id,"] ",update.item["Tag"].to!string," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
 				stdout.flush();
