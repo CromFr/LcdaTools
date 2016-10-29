@@ -17,7 +17,7 @@ import core.thread;
 import mysql.connection;
 import nwn.gff;
 import nwn.twoda;
-import lcdaconfig;
+import lcda.config;
 
 void main(string[] args){
 

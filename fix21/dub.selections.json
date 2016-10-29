@@ -1,7 +1,8 @@
 {
+	"fileVersion": 1,
 	"versions": {
+		"gl3n": "1.3.1",
 		"mysql-native": "0.1.4",
-		"nwn-lib-d": "0.0.1+commit.16.g8e0a03e"
-	},
-	"fileVersion": 1
+		"nwn-lib-d": "~master"
+	}
 }

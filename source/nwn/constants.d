@@ -1,3 +1,5 @@
+module nwn.constants;
+
 enum IP_CONST_ABILITY_STR                        = 0;
 enum IP_CONST_ABILITY_DEX                        = 1;
 enum IP_CONST_ABILITY_CON                        = 2;

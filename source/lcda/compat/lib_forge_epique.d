@@ -1,25 +1,20 @@
-import nwnconstants;
+module lcda.compat.lib_forge_epique;
+
+import nwn.constants;
 import std.conv: to;
-
-
 
 
 mixin((){
 		string ret = `enum EnchantmentId{`;
-		foreach(m ; __traits(allMembers, mixin(__MODULE__))){
+		foreach(m ; __traits(allMembers, lcda.compat.lib_forge_epique)){
 			static if(m.length>12 && m[0..12]=="IP_CONST_WS_"){
 
-				ret ~= m[12..$]~" = "~m~",";
+				ret ~= m[12..$] ~ " = " ~ m ~ ",";
 			}
 		}
-		ret ~= `DAMAGETYPE_ACID       = IP_CONST_DAMAGETYPE_ACID,`;
-		ret ~= `DAMAGETYPE_SONIC      = IP_CONST_DAMAGETYPE_SONIC,`;
-		ret ~= `DAMAGETYPE_FIRE       = IP_CONST_DAMAGETYPE_FIRE,`;
-		ret ~= `DAMAGETYPE_COLD       = IP_CONST_DAMAGETYPE_COLD,`;
-		ret ~= `DAMAGETYPE_ELECTRICAL = IP_CONST_DAMAGETYPE_ELECTRICAL,`;
-		ret ~= `DAMAGETYPE_NEGATIVE   = IP_CONST_DAMAGETYPE_NEGATIVE,`;
-		ret ~= `DAMAGETYPE_POSITIVE   = IP_CONST_DAMAGETYPE_POSITIVE,`;
-		ret ~= `DAMAGETYPE_DIVINE     = IP_CONST_DAMAGETYPE_DIVINE,`;
+		foreach(s ; ["ACID", "SONIC", "FIRE", "COLD", "ELECTRICAL", "NEGATIVE", "POSITIVE", "DIVINE"]){
+			ret ~= "DAMAGETYPE_" ~ s ~ " = IP_CONST_DAMAGETYPE_" ~ s ~ ",";
+		}
 		ret ~= `}`;
 		return ret;
 	}());

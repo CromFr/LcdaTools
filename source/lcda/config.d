@@ -1,9 +1,9 @@
-module lcdaconfig;
+module lcda.config;
 import std.json;
 import std.getopt;
 import std.conv;
 import std.exception: enforce;
-import std.path: exists;
+import std.path: exists, buildPath;
 import std.string;
 import std.algorithm: removeElmts=remove;
 //import std.array;
@@ -109,5 +109,19 @@ void improvedGetoptPrinter(string text, Option[] opt, int width=80){
 			first = false;
 		}
 		writeln();
+	}
+}
+
+
+
+import nwn.twoda;
+auto ref TwoDA getTwoDA(in string name){
+	static __gshared TwoDA[string] twoDACache;
+
+	immutable n = name.toLower;
+	synchronized{
+		if(auto ret = n in twoDACache)
+			return *ret;
+		return twoDACache[n] = new TwoDA(buildPath(LcdaConfig["path_lcdaclientsrc"],"lcda2da.hak",n~".2da"));
 	}
 }
