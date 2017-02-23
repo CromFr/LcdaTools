@@ -547,25 +547,28 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 	updatedItem.as!GffStruct.remove("ItemRcvShadow");
 	updatedItem.as!GffStruct.remove("UVScroll");
 
+	void copyPropertyIfPresent(in GffNode oldItem, ref GffNode updatedItem, string property){
+		if(auto node = property in oldItem.as!GffStruct)
+			updatedItem.appendField(node.dup);
+	}
+
 	//Add instance & inventory props
-	if("ObjectId" in oldItem.as!GffStruct)
-		updatedItem.appendField(oldItem["ObjectId"].dup);
-	if("Repos_Index" in oldItem.as!GffStruct)
-		updatedItem.appendField(oldItem["Repos_Index"].dup);
-	updatedItem.appendField(oldItem["ActionList"].dup);
-	updatedItem.appendField(oldItem["DisplayName"].dup);//TODO: see value is copied from name
-	if("EffectList" in oldItem.as!GffStruct)
-		updatedItem.appendField(oldItem["EffectList"].dup);
+
+	copyPropertyIfPresent(oldItem, updatedItem, "ObjectId");
+	copyPropertyIfPresent(oldItem, updatedItem, "Repos_Index");
+	copyPropertyIfPresent(oldItem, updatedItem, "ActionList");
+	copyPropertyIfPresent(oldItem, updatedItem, "DisplayName");//TODO: see if value is copied from name
+	copyPropertyIfPresent(oldItem, updatedItem, "EffectList");
 	if("LastName" in oldItem.as!GffStruct){
 		if("LastName" !in updatedItem.as!GffStruct)
 			updatedItem.appendField(GffNode(GffType.ExoLocString, "LastName", GffExoLocString(0, [0:""])));
 	}
-	updatedItem.appendField(oldItem["XOrientation"].dup);
-	updatedItem.appendField(oldItem["XPosition"].dup);
-	updatedItem.appendField(oldItem["YOrientation"].dup);
-	updatedItem.appendField(oldItem["YPosition"].dup);
-	updatedItem.appendField(oldItem["ZOrientation"].dup);
-	updatedItem.appendField(oldItem["ZPosition"].dup);
+	copyPropertyIfPresent(oldItem, updatedItem, "XOrientation");
+	copyPropertyIfPresent(oldItem, updatedItem, "XPosition");
+	copyPropertyIfPresent(oldItem, updatedItem, "YOrientation");
+	copyPropertyIfPresent(oldItem, updatedItem, "YPosition");
+	copyPropertyIfPresent(oldItem, updatedItem, "ZOrientation");
+	copyPropertyIfPresent(oldItem, updatedItem, "ZPosition");
 
 	//Set instance properties that must persist through updates
 	//updatedItem["Dropable"] = oldItem["Dropable"].dup;
