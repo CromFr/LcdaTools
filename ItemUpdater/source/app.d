@@ -22,6 +22,8 @@ import lcda.config;
 import lcda.hagbe;
 import lcda.compat.lib_forge_epique;
 
+import nwn.path;
+
 
 
 enum UpdatePolicy{
@@ -52,7 +54,7 @@ int main(string[] args){
 	try{
 		void parseUpdateArg(string param, string arg){
 			import std.regex: ctRegex, matchFirst;
-			enum rgx = ctRegex!r"^(?:(.+)=)?(.+?)(?:\(([^\(]*)\))?$";
+			enum rgx = ctRegex!`^(?:(.+)=)?(.+?)(?:\(([^\(]*)\))?$`;
 
 			foreach(ref s ; arg.split("+")){
 				auto cap = s.matchFirst(rgx);
@@ -116,7 +118,7 @@ int main(string[] args){
 	}
 
 	//paths
-	immutable vault = vaultOvr !is null? vaultOvr : buildPath(LcdaConfig["path_nwn2docs"], "servervault");
+	immutable vault = vaultOvr !is null? vaultOvr : buildPathCI(LcdaConfig["path_nwn2docs"], "servervault");
 	enforce(vault.exists && vault.isDir, "Vault is not a directory/does not exist");
 	immutable temp = tempOvr !is null? tempOvr : buildPath(LcdaConfig["path_nwn2docs"], "itemupdater_tmp");
 
@@ -127,7 +129,7 @@ int main(string[] args){
 
 	foreach(ref bpu ; resrefupdateDef){
 		auto bpPath = bpu.blueprint.extension is null?
-			buildPath(LcdaConfig["path_lcdadev"], bpu.blueprint~".uti") : bpu.blueprint;
+			buildPathCI(LcdaConfig["path_lcdadev"], bpu.blueprint~".uti") : bpu.blueprint;
 		auto gff = new Gff(bpPath);
 
 		if(bpu.from !is null && bpu.from.length>0){
@@ -144,7 +146,7 @@ int main(string[] args){
 	}
 	foreach(ref bpu ; tagupdateDef){
 		auto bpPath = bpu.blueprint.extension is null?
-			buildPath(LcdaConfig["path_lcdadev"], bpu.blueprint~".uti") : bpu.blueprint;
+			buildPathCI(LcdaConfig["path_lcdadev"], bpu.blueprint~".uti") : bpu.blueprint;
 		auto gff = new Gff(bpPath);
 
 		if(bpu.from !is null && bpu.from.length>0){
@@ -236,7 +238,7 @@ int main(string[] args){
 			void updateInventory(ref GffNode container){
 				assert("ItemList" in container.as!(GffType.Struct));
 
-				foreach(ref item ; container["ItemList"].as!GffList){
+				foreach(ref item ; container["ItemList"].as!(GffType.List)){
 					if(auto target = item["TemplateResRef"].to!string in updateResref){
 						updateSingleItem!"resref"(item, *target);
 					}
@@ -251,7 +253,7 @@ int main(string[] args){
 
 				if("Equip_ItemList" in container.as!(GffType.Struct)){
 					bool[size_t] itemsToRemove;
-					foreach(ref item ; container["Equip_ItemList"].as!GffList){
+					foreach(ref item ; container["Equip_ItemList"].as!(GffType.List)){
 
 						bool u = false;
 						if(auto target = item["TemplateResRef"].to!string in updateResref){
@@ -264,9 +266,9 @@ int main(string[] args){
 						}
 
 						if(u){
-							if(container["ItemList"].as!GffList.length < 128){
+							if(container["ItemList"].as!(GffType.List).length < 128){
 								itemsToRemove[item.structType] = true;
-								container["ItemList"].as!GffList ~= item.dup;
+								container["ItemList"].as!(GffType.List) ~= item.dup;
 							}
 							else{
 								stderr.writeln(
@@ -276,14 +278,14 @@ int main(string[] args){
 						}
 					}
 
-					//container["Equip_ItemList"].as!GffList.remove!(a=>(a.structType in itemsToRemove) !is null);
+					//container["Equip_ItemList"].as!(GffType.List).remove!(a=>(a.structType in itemsToRemove) !is null);
 
-					foreach_reverse(i, ref item ; container["Equip_ItemList"].as!GffList){
+					foreach_reverse(i, ref item ; container["Equip_ItemList"].as!(GffType.List)){
 						if(item.structType in itemsToRemove){
-							immutable l = container["Equip_ItemList"].as!GffList.length;
-							container["Equip_ItemList"].as!GffList =
-								container["Equip_ItemList"].as!GffList[0..i]
-								~ (i+1<l? container["Equip_ItemList"].as!GffList[i+1..$] : null);
+							immutable l = container["Equip_ItemList"].as!(GffType.List).length;
+							container["Equip_ItemList"].as!(GffType.List) =
+								container["Equip_ItemList"].as!(GffType.List)[0..i]
+								~ (i+1<l? container["Equip_ItemList"].as!(GffType.List)[i+1..$] : null);
 						}
 					}
 				}
@@ -294,7 +296,7 @@ int main(string[] args){
 
 			if(charUpdated){
 				//Apply refund
-				character["Gold"].as!GffDWord += refund;
+				character["Gold"].as!(GffType.DWord) += refund;
 
 				//copy backup
 				auto backupFile = buildPath(temp, "backup_vault", charPathRelative);
@@ -491,7 +493,7 @@ int main(string[] args){
 
 					if(to.isDir){
 						foreach(child ; from.dirEntries(SpanMode.shallow))
-							copyRecurse(child.name, buildPath(to, child.baseName));
+							copyRecurse(child.name, buildPathCI(to, child.baseName));
 					}
 					else
 						throw new Exception("Cannot copy '"~from~"': '"~to~"' already exists and is not a directory");
@@ -541,14 +543,14 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 	updatedItem.structType = 0;
 
 	//Remove blueprint props
-	updatedItem.as!GffStruct.remove("Comment");
-	updatedItem.as!GffStruct.remove("Classification");
-	updatedItem.as!GffStruct.remove("ItemCastsShadow");
-	updatedItem.as!GffStruct.remove("ItemRcvShadow");
-	updatedItem.as!GffStruct.remove("UVScroll");
+	updatedItem.as!(GffType.Struct).remove("Comment");
+	updatedItem.as!(GffType.Struct).remove("Classification");
+	updatedItem.as!(GffType.Struct).remove("ItemCastsShadow");
+	updatedItem.as!(GffType.Struct).remove("ItemRcvShadow");
+	updatedItem.as!(GffType.Struct).remove("UVScroll");
 
 	void copyPropertyIfPresent(in GffNode oldItem, ref GffNode updatedItem, string property){
-		if(auto node = property in oldItem.as!GffStruct)
+		if(auto node = property in oldItem.as!(GffType.Struct))
 			updatedItem.appendField(node.dup);
 	}
 
@@ -559,8 +561,8 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 	copyPropertyIfPresent(oldItem, updatedItem, "ActionList");
 	copyPropertyIfPresent(oldItem, updatedItem, "DisplayName");//TODO: see if value is copied from name
 	copyPropertyIfPresent(oldItem, updatedItem, "EffectList");
-	if("LastName" in oldItem.as!GffStruct){
-		if("LastName" !in updatedItem.as!GffStruct)
+	if("LastName" in oldItem.as!(GffType.Struct)){
+		if("LastName" !in updatedItem.as!(GffType.Struct))
 			updatedItem.appendField(GffNode(GffType.ExoLocString, "LastName", GffExoLocString(0, [0:""])));
 	}
 	copyPropertyIfPresent(oldItem, updatedItem, "XOrientation");
@@ -573,7 +575,7 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 	//Set instance properties that must persist through updates
 	//updatedItem["Dropable"] = oldItem["Dropable"].dup;
 	updatedItem["StackSize"] = oldItem["StackSize"].dup;
-	if("ItemList" in oldItem.as!GffStruct){
+	if("ItemList" in oldItem.as!(GffType.Struct)){
 		enforce(blueprint["BaseItem"].to!int == 66,
 			"Updating an container (bag) by removing its container ability would remove all its content"
 			~" ("~oldItem["Tag"].to!string~" => "~blueprint["TemplateResRef"].to!string~")");
@@ -583,11 +585,11 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 	updatedItem.structType = oldItem.structType;
 
 	//Fix nwn2 oddities
-	updatedItem["ArmorRulesType"] = GffNode(GffType.Int, "ArmorRulesType", blueprint["ArmorRulesType"].as!GffByte);
-	updatedItem["Cost"].as!GffDWord = 0;
-	foreach(ref prop ; updatedItem["PropertiesList"].as!GffList){
-		prop.as!GffStruct.remove("Param2");
-		prop.as!GffStruct.remove("Param2Value");
+	updatedItem["ArmorRulesType"] = GffNode(GffType.Int, "ArmorRulesType", blueprint["ArmorRulesType"].as!(GffType.Byte));
+	updatedItem["Cost"].as!(GffType.DWord) = 0;
+	foreach(ref prop ; updatedItem["PropertiesList"].as!(GffType.List)){
+		prop.as!(GffType.Struct).remove("Param2");
+		prop.as!(GffType.Struct).remove("Param2Value");
 		prop["UsesPerDay"] = GffNode(GffType.Byte, "UsesPerDay", 255);
 		prop["Useable"] = GffNode(GffType.Byte, "Useable", 1);
 	}
@@ -595,10 +597,10 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 
 	//Copy local variables
 	size_t[string] varsInUpdatedItem;
-	foreach(i, ref var ; updatedItem["VarTable"].as!GffList)
-		varsInUpdatedItem[var["Name"].as!GffExoString] = i;
+	foreach(i, ref var ; updatedItem["VarTable"].as!(GffType.List))
+		varsInUpdatedItem[var["Name"].as!(GffType.ExoString)] = i;
 
-	foreach(ref oldItemVar ; oldItem["VarTable"].as!GffList){
+	foreach(ref oldItemVar ; oldItem["VarTable"].as!(GffType.List)){
 		immutable name = oldItemVar["Name"].to!string;
 
 		auto policy = UpdatePolicy.Keep;
@@ -609,7 +611,7 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 		if(name=="DEJA_ENCHANTE")
 			enchanted   = oldItemVar["Value"].to!bool;
 		else if(name=="X2_LAST_PROPERTY"){
-			auto val = oldItemVar["Value"].as!GffInt;
+			auto val = oldItemVar["Value"].as!(GffType.Int);
 			if(val>0)
 				enchantment = val.to!EnchantmentId;
 		}
@@ -630,8 +632,8 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 			//Append var
 			if(policy == UpdatePolicy.Keep){
 				//Add oldvar to updated item
-				varsInUpdatedItem[name] = updatedItem["VarTable"].as!GffList.length;
-				updatedItem["VarTable"].as!GffList ~= oldItemVar.dup;
+				varsInUpdatedItem[name] = updatedItem["VarTable"].as!(GffType.List).length;
+				updatedItem["VarTable"].as!(GffType.List) ~= oldItemVar.dup;
 			}
 			else{
 				//Do not add oldvar to updated item
@@ -643,8 +645,8 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 	foreach(propName, policy ; itemPolicy){
 		if(propName.length<4 || propName[0..4]!="Var."){
 			//policy is for a property
-			auto propOld = propName in oldItem.as!GffStruct;
-			auto propUpd = propName in updatedItem.as!GffStruct;
+			auto propOld = propName in oldItem.as!(GffType.Struct);
+			auto propUpd = propName in updatedItem.as!(GffType.Struct);
 			enforce(propOld && propUpd, "Property '"~propName~"' does not exist in both instance and blueprint, impossible to enforce policy.");
 			if(policy == UpdatePolicy.Keep){
 				*propUpd = propOld.dup;
@@ -667,12 +669,12 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 
 
 			//Remove enchantment variables
-			foreach_reverse(i, ref var ; updatedItem["VarTable"].as!GffList){
+			foreach_reverse(i, ref var ; updatedItem["VarTable"].as!(GffType.List)){
 				if(var["Name"].to!string=="DEJA_ENCHANTE" || var["Name"].to!string=="X2_LAST_PROPERTY"){
-					immutable l = updatedItem["VarTable"].as!GffList.length;
-					updatedItem["VarTable"].as!GffList =
-						updatedItem["VarTable"].as!GffList[0..i]
-						~ (i+1<l? updatedItem["VarTable"].as!GffList[i+1..$] : null);
+					immutable l = updatedItem["VarTable"].as!(GffType.List).length;
+					updatedItem["VarTable"].as!(GffType.List) =
+						updatedItem["VarTable"].as!(GffType.List)[0..i]
+						~ (i+1<l? updatedItem["VarTable"].as!(GffType.List)[i+1..$] : null);
 				}
 			}
 		}

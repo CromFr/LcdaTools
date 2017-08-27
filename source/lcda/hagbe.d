@@ -185,9 +185,9 @@ class EnchantmentException : Exception{
 
 void enchantItem(ref GffNode item, EnchantmentId enchantType){
 	GffNode* findExistingProperty(in PropType propType){
-		foreach(ref prop ; item["PropertiesList"].as!GffList){
-			if(prop["PropertyName"].as!GffWord == propType.propertyName
-				&& (propType.subType!=uint16_t.max? prop["Subtype"].as!GffWord==propType.subType : true))
+		foreach(ref prop ; item["PropertiesList"].as!(GffType.List)){
+			if(prop["PropertyName"].as!(GffType.Word) == propType.propertyName
+				&& (propType.subType!=uint16_t.max? prop["Subtype"].as!(GffType.Word)==propType.subType : true))
 				return &prop;
 		}
 		return null;
@@ -214,7 +214,7 @@ void enchantItem(ref GffNode item, EnchantmentId enchantType){
 			enforce!EnchantmentException(findExistingProperty(propertyType) is null,
 				"Enchantment "~propertyType.toString~" already exist on the updated version");
 
-			item["PropertiesList"].as!GffList ~= buildPropertyUsing2DA(propertyType);
+			item["PropertiesList"].as!(GffType.List) ~= buildPropertyUsing2DA(propertyType);
 			return;
 
 		default:
@@ -237,24 +237,24 @@ void enchantItem(ref GffNode item, EnchantmentId enchantType){
 					assert(propertyType.costValue==0);
 
 					maxCostValue = 15;
-					newCostValue = cast(GffWord)((*prop)["CostValue"].as!GffWord + 5);
+					newCostValue = cast(GffWord)((*prop)["CostValue"].as!(GffType.Word) + 5);
 				}
 				else{
 					immutable costValueTableIndex = getTwoDA("itempropdef").get("CostTableResRef", propertyType.propertyName);
 					immutable costValueTable = getTwoDA("iprp_costtable").get("Name", costValueTableIndex.to!uint);
 
 					maxCostValue = cast(GffWord)(getTwoDA(costValueTable).rows-1);
-					newCostValue = cast(GffWord)((*prop)["CostValue"].as!GffWord + propertyType.costValue);
+					newCostValue = cast(GffWord)((*prop)["CostValue"].as!(GffType.Word) + propertyType.costValue);
 				}
 
 				enforce!EnchantmentException(newCostValue <= maxCostValue,
 					"Cannot merge enchantment "~propertyType.toString~": CostValue "~newCostValue.to!string~" is too high");
 
-				(*prop)["CostValue"].as!GffWord = newCostValue;
+				(*prop)["CostValue"].as!(GffType.Word) = newCostValue;
 			}
 			else{
 				//append
-				item["PropertiesList"].as!GffList ~= buildPropertyUsing2DA(propertyType);
+				item["PropertiesList"].as!(GffType.List) ~= buildPropertyUsing2DA(propertyType);
 			}
 			return;
 	}
