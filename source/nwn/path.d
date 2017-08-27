@@ -7,6 +7,7 @@ module nwn.path;
 string buildPathCI(T...)(in string basePath, T subFiles){
 	import std.file;
 	import std.path;
+	import std.string: toUpper;
 
 	assert(basePath.exists, "basePath does not exist");
 	string path = basePath;
