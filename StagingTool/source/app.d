@@ -7,6 +7,16 @@ import std.file;
 import std.file: readFile = read, writeFile = write;
 import std.exception;
 
+version(Windows){
+	enum lzmaName = "lzma.exe";
+	enum lzmaBin = import(lzmaName);
+}
+else{
+	enum lzmaName = "lzma";
+	enum lzmaBin = import(lzmaName);
+}
+string lzmaPath = null;
+
 
 void info(T...)(T args){
 	stderr.writeln("\x1b[32;1m", args, "\x1b[m");
@@ -40,6 +50,16 @@ int main(string[] args)
 		return 0;
 	}
 
+
+	//Setup lzma tool
+	lzmaPath = buildPath(tempDir, lzmaName);
+	writeFile(lzmaPath, lzmaBin);
+	version(Posix){
+		setAttributes(lzmaPath, getAttributes(lzmaPath) | 0b001_001_001);
+	}
+
+
+	//Process args
 	auto outPath = DirEntry(args[1]);
 	auto resPaths = args[2 .. $];
 
@@ -87,6 +107,7 @@ int main(string[] args)
 
 	foreach(name, hash ; resourceHashes){
 		warning("Removed file: ", name);
+		//TODO: remove lzma files from output dir
 	}
 
 	//Sort resource list
@@ -146,26 +167,16 @@ struct Resource{
 			genDlFile = true;
 		}
 
-		ubyte[] dlData;
 		if(genDlFile){
 			import std.process: execute, Config;
-			auto command = ["lzma", "-zc", "--threads=0", resFile.name];
+			auto command = [lzmaPath, "e", resFile.name, dlFilePath];
 
 			if(verbose) writeln("Compressing ", name, ": ", command.join(" "));
-			auto res = execute(command,
-				null,
-				Config.none,
-				size_t.max,
-				outputDir);
+			auto res = execute(command);
 			enforce(res.status == 0, "lzma command failed:\n"~res.output);
-
-			dlData = cast(ubyte[])res.output.dup();
-			writeFile(dlFilePath, dlData);
-		}
-		else{
-			dlData = cast(ubyte[])readFile(dlFilePath);
 		}
 
+		ubyte[] dlData = cast(ubyte[])readFile(dlFilePath);
 		dlSize = dlData.length;
 		dlHash = dlData.sha1Of.toHexString.idup;
 	}
@@ -184,7 +195,6 @@ struct Resource{
 				~" hash=\""~resHash~"\""
 				~" size="~("\""~resSize.to!string~"\"").leftJustify(9+2)
 				~" downloadHash=\""~dlHash~"\""
-				~" dlsize=\""~dlSize.to!string~"\""
 				~" dlsize="~("\""~dlSize.to!string~"\"").leftJustify(9+2)
 				~" critical=\"false\""
 				~" exclude=\"false\""

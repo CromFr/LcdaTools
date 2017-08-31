@@ -6,4 +6,4 @@ license "GPL-3.0"
 
 dependency "nwn-lib-d" version="*"
 sourcePaths "source" "../source"
-
+stringImportPaths "lzma/Util/Lzma"
