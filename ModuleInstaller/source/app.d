@@ -61,7 +61,7 @@ int main(string[] args)
 	enforce(modulePath.isDir, "module_git_repo does not exist");
 	enforce(nwnHomePath.isDir, "nwn2home does not exist");
 
-	auto moduleName = name is null? modulePath.baseName : name;
+	auto moduleName = name is null? DirEntry(modulePath).baseName : name;
 
 	auto outModuleDir = nwnHomePath.subFileCI("modules").subFileCI(moduleName);
 	auto outOverrideDir = nwnHomePath.subFileCI("override").subFileCI(moduleName);
