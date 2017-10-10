@@ -23,12 +23,16 @@ string buildPathCI(T...)(in string basePath, T subFiles){
 		}
 		//Perform full scan of the directory
 		else{
+			bool bFound = false;
 			foreach(file ; path.dirEntries(SpanMode.shallow)){
 				if(filenameCmp!(CaseSensitive.no)(file.baseName, subFile) == 0){
+					bFound = true;
 					path = file.name;
 					break;
 				}
 			}
+			if(!bFound)
+				path = buildPath(path, subFile);
 		}
 	}
 	return path;
