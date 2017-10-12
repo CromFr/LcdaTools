@@ -39,10 +39,11 @@ int main(string[] args){
 
 	string vaultOvr;
 	string tempOvr;
-	bool noninteractive = false;
+	bool alwaysAccept = false;
 	uint parallelJobs = 1;
 	bool skipVault = false;
 	bool skipSql = false;
+	bool dryRun = false;
 
 	alias BlueprintUpdateDef = Tuple!(string,"from", string,"blueprint", UpdatePolicy[string],"policy");
 	BlueprintUpdateDef[] resrefupdateDef;
@@ -97,7 +98,8 @@ int main(string[] args){
 			"update-tag", "Similar to --update, but using the Tag property as identifier.", &parseUpdateArg,
 			"skip-vault", "Do not update the servervault", &skipVault,
 			"skip-sql", "Do not update the items in the SQL db (coffreibee, casieribee)", &skipSql,
-			"y|y", "Do not prompt and accept everything", &noninteractive,
+			"dry-run", "Do not write any file or execute any SQL write commands", &dryRun,
+			"y|y", "Do not prompt and accept everything", &alwaysAccept,
 			"j|j", "Number of parallel jobs\nDefault: 1", &parallelJobs,
 			).options;
 
@@ -182,19 +184,21 @@ int main(string[] args){
 			conn.close();
 	}
 
-	if(temp.exists){
-		if(noninteractive==false && !temp.dirEntries(SpanMode.shallow).empty){
-			stderr.writeln("\x1b[1;31mWARNING: '",temp,"' is not empty and may contain backups from previous item updates\x1b[m");
-			writeln();
-			write("'d' to delete content and continue: ");
-			stdout.flush();
-			if(readln()[0] != 'd')
-				return 1;
+	if(dryRun == false){
+		if(temp.exists){
+			if(alwaysAccept == false && !temp.dirEntries(SpanMode.shallow).empty){
+				stderr.writeln("\x1b[1;31mWARNING: '", temp, "' is not empty and may contain backups from previous item updates\x1b[m");
+				writeln();
+				write("'d' to delete content and continue: ");
+				stdout.flush();
+				if(readln()[0] != 'd')
+					return 1;
+			}
+			temp.rmdirRecurse;
+			writeln("Deleted '",temp,"'");
 		}
-		temp.rmdirRecurse;
-		writeln("Deleted '",temp,"'");
+		temp.mkdirRecurse;
 	}
-	temp.mkdirRecurse;
 
 
 	//Servervault update
@@ -304,10 +308,13 @@ int main(string[] args){
 				charFile.copy(backupFile);
 
 				//serialize current
-				auto tmpFile = buildPath(temp, "updated_vault", charPathRelative);
-				if(!buildNormalizedPath(tmpFile, "..").exists)
-					buildNormalizedPath(tmpFile, "..").mkdirRecurse;
-				tmpFile.writeFile(character.serialize);
+				auto serializedChar = character.serialize;
+				if(dryRun == false){
+					auto tmpFile = buildPath(temp, "updated_vault", charPathRelative);
+					if(!buildNormalizedPath(tmpFile, "..").exists)
+						buildNormalizedPath(tmpFile, "..").mkdirRecurse;
+					tmpFile.writeFile(serializedChar);
+				}
 
 				//message
 				write(charPathRelative.leftJustify(35));
@@ -350,118 +357,95 @@ int main(string[] args){
 			enforce(affectedRows==1, "Wrong number of rows affected by SQL query");
 		}
 
+
+		void UpdateSQL(string type)(){
+			static if(type == "coffreibee")
+				auto res = Command(conn, "SELECT id, item_name, account_name, item_data FROM coffreibee").execSQLResult;
+			else static if(type == "casieribee")
+				auto res = Command(conn, "SELECT id, item_name, vendor_account_name, item_data FROM casieribee WHERE active=1").execSQLResult;
+			else static assert(0);
+
+			foreach(row ; res){
+				auto id = row[0].get!long;
+				auto itemName = row[1].get!string;
+				auto owner = row[2].get!string;
+				auto itemData = row[3].get!(ubyte[]);
+				auto item = new Gff(itemData);
+
+				auto target = item["TemplateResRef"].to!string in updateResref;
+				if(!target) target = item["Tag"].to!string in updateTag;
+
+				if(target){
+					auto update = item.updateItem(target.gff, target.policy, type~"["~id.to!string~"]");
+
+					item.root = update.item;
+					ubyte[] updatedData = item.serialize();
+
+					if(itemData == updatedData){
+						writeln("\x1b[1;31mWARNING: Item id=", id, " (resref=", target.gff["TemplateResRef"].to!string, ") did not change after update\x1b[m");
+					}
+					else if(dryRun == false){
+						bool firstUpdate = itemName.indexOf("<b><c=red>MAJ</c></b>") == -1;
+
+						//Update item data
+						static if(type == "coffreibee"){
+							//Item will be updated and name will be changed
+							auto cmdUpdate = Command(conn,
+									"UPDATE coffreibee SET"
+										~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
+										~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
+										~" item_data=?"
+									~" WHERE id=?");
+						}
+						else static if(type == "casieribee"){
+							//Item will be updated and marked as forbidden to sell (do not appear in list) and can be retrieved by the owner
+							auto cmdUpdate = Command(conn,
+									"UPDATE casieribee SET"
+										~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
+										~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
+										~" sale_allowed=0,"
+										~" item_data=?"
+									~" WHERE id=?");
+						}
+						else static assert(0);
+
+						cmdUpdate.prepare;
+						cmdUpdate.bindParameterTuple(updatedData, id);
+						cmdUpdate.execPrepared(affectedRows);
+						enforce(affectedRows==1, "Wrong number of rows affected by SQL query: "~affectedRows.to!string~" rows affected for item ID="~id.to!string);
+
+						if(update.refund > 0){
+							//Apply refund in bank
+							refundInBank(owner, update.refund);
+						}
+
+
+						static if(type == "coffreibee")
+							buildPath(coffreIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
+						else static if(type == "casieribee")
+							buildPath(casierIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
+						else static assert(0);
+					}
+
+					writeln(type~"[",id,"] ",update.item["Tag"].to!string," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
+					stdout.flush();
+				}
+
+
+			}
+		}
+
 		//COFFREIBEE
 		bench.reset;
 		bench.start;
-		auto res = Command(conn, "SELECT id, item_name, account_name, item_data FROM coffreibee").execSQLResult;
-		foreach(row ; res){
-			auto id = row[0].get!long;
-			auto itemName = row[1].get!string;
-			auto owner = row[2].get!string;
-			auto itemData = row[3].get!(ubyte[]);
-			auto item = new Gff(itemData);
-
-			auto target = item["TemplateResRef"].to!string in updateResref;
-			if(!target) target = item["Tag"].to!string in updateTag;
-
-			if(target){
-				//Item will be updated and name will be changed
-				auto update = item.updateItem(target.gff, target.policy, "coffreibee["~id.to!string~"]");
-
-				item.root = update.item;
-				ubyte[] updatedData = item.serialize();
-
-				if(itemData == updatedData){
-					writeln("\x1b[1;31mWARNING: Item id=", id, " (resref=", target.gff["TemplateResRef"].to!string, ") did not change after update\x1b[m");
-				}
-				else{
-					bool firstUpdate = itemName.indexOf("<b><c=red>MAJ</c></b>")==-1;
-
-					//Update item data
-					auto cmdUpdate = Command(conn,
-							"UPDATE coffreibee SET"
-								~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
-								~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
-								~" item_data=?"
-							~" WHERE id=?");
-					cmdUpdate.prepare;
-					cmdUpdate.bindParameterTuple(updatedData, id);
-					cmdUpdate.execPrepared(affectedRows);
-					enforce(affectedRows==1, "Wrong number of rows affected by SQL query: "~affectedRows.to!string~" rows affected for item ID="~id.to!string);
-
-					if(update.refund > 0){
-						//Apply refund in bank
-						refundInBank(owner, update.refund);
-					}
-
-					buildPath(coffreIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
-				}
-
-
-				writeln("coffreibee[",id,"] ",update.item["Tag"].to!string," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
-				stdout.flush();
-			}
-
-
-		}
+		UpdateSQL!"coffreibee";
 		writeln("-----");
 		//CASIERIBEE
-		res = Command(conn, "SELECT id, item_name, vendor_account_name, item_data FROM casieribee WHERE active=1").execSQLResult;
-		foreach(row ; res){
-			auto id = row[0].get!long;
-			auto itemName = row[1].get!string;
-			auto owner = row[2].get!string;
-			auto itemData = row[3].get!(ubyte[]);
-			auto item = new Gff(itemData);
-
-			auto target = item["TemplateResRef"].to!string in updateResref;
-			if(!target) target = item["Tag"].to!string in updateTag;
-
-			if(target){
-				//Item will be updated and marked as sold with price = 0gp
-				auto update = item.updateItem(target.gff, target.policy, "casieribee["~id.to!string~"]");
-
-				item.root = update.item;
-				ubyte[] updatedData = item.serialize();
-
-				if(itemData == updatedData){
-					writeln("\x1b[1;31mWARNING: Item id=", id, " (resref=", target.gff["TemplateResRef"].to!string, ") did not change after update\x1b[m");
-				}
-				else{
-					bool firstUpdate = itemName.indexOf("<b><c=red>MAJ</c></b>")==-1;
-
-					//Update item data
-					auto cmdUpdate = Command(conn,
-							"UPDATE casieribee SET"
-								~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
-								~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
-								~" sale_allowed=0,"
-								~" item_data=?"
-							~" WHERE id=?");
-					cmdUpdate.prepare;
-					cmdUpdate.bindParameterTuple(updatedData, id);
-					cmdUpdate.execPrepared(affectedRows);
-					enforce(affectedRows==1, "Wrong number of rows affected by SQL query: "~affectedRows.to!string~" rows affected for item ID="~id.to!string);
-
-					if(update.refund > 0){
-						//Apply refund in bank
-						refundInBank(owner, update.refund);
-					}
-
-					buildPath(casierIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
-				}
-
-				writeln("casieribee[",id,"] ",update.item["Tag"].to!string," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
-				stdout.flush();
-			}
-
-
-		}
+		UpdateSQL!"casieribee";
 		bench.stop;
+
 		writeln(">>> ",bench.peek.msecs/1000.0," seconds");
 	}
-
-
 
 
 	writeln();
@@ -472,60 +456,64 @@ int main(string[] args){
 	writeln("- new character files have been put in ", buildPath(temp, "updated_vault"));
 	writeln("- new items in database are pending for SQL commit");
 	writeln();
-	if(noninteractive==false){
 
-		char ans;
+
+	char ans;
+	if(alwaysAccept==false){
 		do{
 			write("'y' to apply changes, 'n' to discard them: ");
 			stdout.flush();
 			ans = readln()[0];
 		} while(ans!='y' && ans !='n');
+	}
+	else
+		ans = 'y';
 
-		if(ans=='y'){
-			//Copy char to new vault
-			size_t count;
-			void copyRecurse(string from, string to){
-				if(isDir(from)){
-					if(!to.exists){
-						mkdir(to);
-					}
-
-					if(to.isDir){
-						foreach(child ; from.dirEntries(SpanMode.shallow))
-							copyRecurse(child.name, buildPathCI(to, child.baseName));
-					}
-					else
-						throw new Exception("Cannot copy '"~from~"': '"~to~"' already exists and is not a directory");
+	if(ans=='y' && dryRun == false){
+		//Copy char to new vault
+		size_t count;
+		void copyRecurse(string from, string to){
+			if(isDir(from)){
+				if(!to.exists){
+					mkdir(to);
 				}
-				else{
-					//writeln("> ",to); stdout.flush();
-					copy(from, to);
-					count++;
+
+				if(to.isDir){
+					foreach(child ; from.dirEntries(SpanMode.shallow))
+						copyRecurse(child.name, buildPathCI(to, child.baseName));
 				}
+				else
+					throw new Exception("Cannot copy '"~from~"': '"~to~"' already exists and is not a directory");
 			}
-
-			if(!skipVault){
-				copyRecurse(buildPath(temp, "updated_vault"), vault);
-				writeln(count," files copied");
-				stdout.flush();
+			else{
+				//writeln("> ",to); stdout.flush();
+				copy(from, to);
+				count++;
 			}
-
-			//SQL commit
-			if(!skipSql){
-				Command(conn, "COMMIT").execSQL;
-				writeln("SQL work commited");
-				stdout.flush();
-			}
-
-			writeln("  DONE !  ".center(80, '_'));
-
-			return 0;
 		}
+
+
+		if(!skipVault){
+			copyRecurse(buildPath(temp, "updated_vault"), vault);
+			writeln(count," files copied");
+			stdout.flush();
+		}
+
+		//SQL commit
+		if(!skipSql){
+			Command(conn, "COMMIT").execSQL;
+			writeln("SQL work commited");
+			stdout.flush();
+		}
+
+		writeln("  DONE !  ".center(80, '_'));
+
+		return 0;
 	}
 
 
 	//SQL rollback
-	if(!skipSql)
+	if(!skipSql && dryRun == false)
 		Command(conn, "ROLLBACK").execSQL;
 
 
