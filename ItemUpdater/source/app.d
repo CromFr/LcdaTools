@@ -30,14 +30,13 @@ enum UpdatePolicy{
 	Override = 0,
 	Keep = 1,
 }
-
 alias ItemPolicy = UpdatePolicy[string];
-ItemPolicy[string] updatePolicy;
-
-//--update 'item_resref=>item_blueprint("Cursed":Keep, "Var.bIntelligent=Override")'
-//--update-tag 'item_resref=>item_blueprint("Cursed":Keep, "Var.bIntelligent=Override")'
 
 int main(string[] args){
+	import etc.linux.memoryerror;
+	static if (is(typeof(registerMemoryErrorHandler)))
+		registerMemoryErrorHandler();
+
 	string vaultOvr;
 	string tempOvr;
 	bool noninteractive = false;

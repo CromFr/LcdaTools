@@ -31,7 +31,12 @@ static shared:
 				configPath = "./config.json";
 			else if("../config.json".exists)
 				configPath = "../config.json";
-			else
+			else version(linux){
+				if("/etc/lcda.json".exists)
+					configPath = "/etc/lcda.json";
+			}
+
+			if(configPath is null)
 				throw new Exception("Could not find config.json");
 		}
 
@@ -59,7 +64,7 @@ static shared:
 			values[key] = value;
 		}
 
-		foreach(key ; ["path_nwn2docs","path_nwn2prg","path_lcdadev","path_lcdaclientsrc"]){
+		foreach(key ; ["path_nwn2docs","path_lcdadev","path_lcdaclientsrc"]){
 			enforce(values[key].exists, "Path '"~values[key]~"' does not exist");
 		}
 
