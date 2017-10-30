@@ -1,0 +1,16 @@
+.dub
+docs.json
+__dummy.html
+docs/
+bictoutc.so
+bictoutc.dylib
+bictoutc.dll
+bictoutc.a
+bictoutc.lib
+bictoutc-test-*
+*.exe
+*.o
+*.obj
+*.lst
+
+bictoutc*
