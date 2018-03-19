@@ -1,13 +1,15 @@
 import std.stdio;
 import std.getopt;
+import std.path;
 import nwn.gff;
 
 int main(string[] args)
 {
-	if(args.length != 3){
-		writeln("Usage: ", args[0], " infile.bic outfile.utc");
+	if(args.length != 2 && args.length != 3){
+		writeln("Usage: ", args[0], " infile.bic [outfile.utc]");
 		return 1;
 	}
+	auto targetFile = args.length == 3? args[2] : args[1].setExtension("utc");
 
 	auto gff = new Gff(args[1]);
 
@@ -32,7 +34,7 @@ int main(string[] args)
 
 	//Write file
 	import std.file: writeFile = write;
-	writeFile(args[2], gff.serialize());
+	writeFile(targetFile, gff.serialize());
 
 	return 0;
 }
