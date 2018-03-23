@@ -13,6 +13,9 @@ int main(string[] args)
 
 	auto gff = new Gff(args[1]);
 
+
+	immutable resref = args[1].baseName.stripExtension;
+
 	gff.fileType = "UTC";
 
 	//Set equipped item list resrefs
@@ -31,6 +34,31 @@ int main(string[] args)
 
 	//Remove inventory items
 	gff["ItemList"].as!(GffType.List).length = 0;
+
+	//Set misc
+	gff["TemplateResRef"].as!(GffType.ResRef) = resref;
+	gff["Tag"].as!(GffType.ExoString) = resref;
+	gff["FactionID"].as!(GffType.Word) = 1;
+	gff["Classification"] = GffNode(GffType.ExoString, null, "");
+	gff["IsPC"].as!(GffType.Byte) = 0;
+	gff.as!(GffType.Struct).remove("LvlStatList");
+
+	//Set scripts
+	gff["ScriptAttacked"].as!(GffType.ResRef) = "nw_c2_default5";
+	gff["ScriptDamaged"].as!(GffType.ResRef) = "nw_c2_default6";
+	gff["ScriptDeath"].as!(GffType.ResRef) = "nw_c2_default7";
+	gff["ScriptDialogue"].as!(GffType.ResRef) = "nw_c2_default4";
+	gff["ScriptDisturbed"].as!(GffType.ResRef) = "nw_c2_default8";
+	gff["ScriptEndRound"].as!(GffType.ResRef) = "nw_c2_default3";
+	gff["ScriptHeartbeat"].as!(GffType.ResRef) = "nw_c2_default1";
+	gff["ScriptOnBlocked"].as!(GffType.ResRef) = "nw_c2_defaulte";
+	gff["ScriptOnNotice"].as!(GffType.ResRef) = "nw_c2_default2";
+	gff["ScriptRested"].as!(GffType.ResRef) = "nw_c2_defaulta";
+	gff["ScriptSpawn"].as!(GffType.ResRef) = "nw_c2_default9";
+	gff["ScriptSpellAt"].as!(GffType.ResRef) = "nw_c2_defaultb";
+	gff["ScriptUserDefine"].as!(GffType.ResRef) = "nw_c2_defaultd";
+
+
 
 	//Write file
 	import std.file: writeFile = write;
