@@ -13,6 +13,7 @@ import std.exception: assertThrown, assertNotThrown, enforce;
 import std.algorithm;
 import std.datetime.stopwatch: StopWatch;
 import std.parallelism;
+import std.array;
 import core.thread;
 import mysql;
 import nwn.gff;
@@ -364,8 +365,6 @@ int main(string[] args){
 		immutable casierIbeeBackup = buildPath(temp, "backup_casieribee");
 		casierIbeeBackup.mkdirRecurse;
 
-		ulong affectedRows;
-
 
 		void UpdateSQL(string type)(){
 			auto connLoop = connPool.lockConnection();
@@ -375,7 +374,7 @@ int main(string[] args){
 				auto res = connLoop.query("SELECT id, item_name, vendor_account_name, item_data FROM casieribee WHERE active=1");
 			else static assert(0);
 
-			foreach(row ; res){
+			foreach(row ; taskPool.parallel(res.array)){
 				auto id = row[0].get!long;
 				auto itemName = row[1].get!string;
 				auto owner = row[2].get!string;
