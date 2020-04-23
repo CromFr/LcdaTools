@@ -32,8 +32,6 @@ enum UpdatePolicy{
 }
 alias ItemPolicy = UpdatePolicy[string];
 
-StrRefResolver tlkresolv;
-
 int main(string[] args){
 	import etc.linux.memoryerror;
 	static if (is(typeof(registerMemoryErrorHandler)))
@@ -126,7 +124,7 @@ int main(string[] args){
 	immutable temp = tempOvr !is null? tempOvr : buildPath(LcdaConfig["path_nwn2docs"], "itemupdater_tmp");
 
 	// TLK resolving
-	tlkresolv = new StrRefResolver(
+	auto tlkresolv = new StrRefResolver(
 		new Tlk(buildPath(LcdaConfig["path_tlk_main"])),
 		new Tlk(buildPath(LcdaConfig["path_tlk_lcda"])),
 	);
@@ -187,12 +185,21 @@ int main(string[] args){
 		LcdaConfig["sql_password"],
 		LcdaConfig["sql_schema"]
 	);
-	Connection conn1 = null;
 	if(connPool !is null){
 		connPool.onNewConnection = delegate(conn){
 			conn.exec("SET autocommit=0");
+
+			// The workaround for manual commit / rollback relies on the
+			// lastCommandID to know if the connection has been used and
+			// should be committed / rolled back
+			assert(conn.lastCommandID == 3);
 		};
-		conn1 = connPool.lockConnection();
+		connPool.lockConnection();
+	}
+	scope(exit){
+		if(connPool !is null){
+			connPool.removeUnusedConnections();
+		}
 	}
 
 	if(dryRun == false){
@@ -243,7 +250,7 @@ int main(string[] args){
 					updatedItemStats[identifier] = 1;
 
 				charUpdated = true;
-				auto update = item.updateItem(target.gff, target.policy, charFile.relativePath(vault));
+				auto update = item.updateItem(target.gff, target.policy, charFile.relativePath(vault), tlkresolv);
 
 				refund += update.refund;
 				item = update.item;
@@ -361,10 +368,11 @@ int main(string[] args){
 
 
 		void UpdateSQL(string type)(){
+			auto connLoop = connPool.lockConnection();
 			static if(type == "coffreibee")
-				auto res = connPool.lockConnection().query("SELECT id, item_name, account_name, item_data FROM coffreibee");
+				auto res = connLoop.query("SELECT id, item_name, account_name, item_data FROM coffreibee");
 			else static if(type == "casieribee")
-				auto res = connPool.lockConnection().query("SELECT id, item_name, vendor_account_name, item_data FROM casieribee WHERE active=1");
+				auto res = connLoop.query("SELECT id, item_name, vendor_account_name, item_data FROM casieribee WHERE active=1");
 			else static assert(0);
 
 			foreach(row ; res){
@@ -378,7 +386,7 @@ int main(string[] args){
 				if(!target) target = item["Tag"].to!string in updateTag;
 
 				if(target){
-					auto update = item.updateItem(target.gff, target.policy, type~"["~id.to!string~"]");
+					auto update = item.updateItem(target.gff, target.policy, type~"["~id.to!string~"]", tlkresolv);
 
 					item.root = update.item;
 					ubyte[] updatedData = item.serialize();
@@ -510,17 +518,18 @@ int main(string[] args){
 		//SQL commit
 		if(!skipSql){
 			//conn.exec("COMMIT");
-			auto conns = [conn1];
-			while(conns[$-1].lastCommandID != 0){
+			auto conns = [connPool.lockConnection()];
+			while(conns[$-1].lastCommandID > 3){
 				conns[$-1].exec("COMMIT");
 				conns ~= connPool.lockConnection();
 			}
+			foreach(ref conn ; conns)
+				conn.close();
 			writeln("SQL work commited");
 			stdout.flush();
 		}
 
 		writeln("  DONE !  ".center(80, '_'));
-
 		return 0;
 	}
 
@@ -528,20 +537,21 @@ int main(string[] args){
 	//SQL rollback
 	if(!skipSql && dryRun == false){
 		//conn.exec("ROLLBACK");
-		auto conns = [conn1];
-		while(conns[$-1].lastCommandID != 0){
+		auto conns = [connPool.lockConnection()];
+		while(conns[$-1].lastCommandID > 3){
 			conns[$-1].exec("ROLLBACK");
 			conns ~= connPool.lockConnection();
 		}
+		foreach(ref conn ; conns)
+			conn.close();
 	}
-
 
 	return 0;
 }
 
 
 ///
-auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPolicy, lazy string ownerName){
+auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPolicy, lazy string ownerName, in StrRefResolver tlkresolv){
 	bool enchanted = false;
 	EnchantmentId enchantment;
 
