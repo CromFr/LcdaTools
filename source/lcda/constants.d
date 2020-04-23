@@ -1,4 +1,4 @@
-module nwn.constants;
+module lcda.constants;
 
 enum IP_CONST_ABILITY_STR                        = 0;
 enum IP_CONST_ABILITY_DEX                        = 1;

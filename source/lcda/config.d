@@ -3,7 +3,8 @@ import std.json;
 import std.getopt;
 import std.conv;
 import std.exception: enforce;
-import std.path: exists, buildPath;
+import std.path: buildPath;
+import std.file: exists;
 import std.string;
 import std.algorithm: removeElmts=remove;
 //import std.array;
@@ -51,11 +52,11 @@ static shared:
 			.parseJSON;
 
 		foreach(string key, ref value ; json){
-			if(value.type == JSON_TYPE.OBJECT || value.type == JSON_TYPE.ARRAY){
+			if(value.type == JSONType.object || value.type == JSONType.array){
 				complexValues[key] = value;
 			}
 			else{
-				enforce(value.type == JSON_TYPE.STRING, "Values in config files must be objects, arrays or strings");
+				enforce(value.type == JSONType.string, "Values in config files must be objects, arrays or strings");
 				values[key] = value.str;
 			}
 		}

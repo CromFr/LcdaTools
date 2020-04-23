@@ -11,18 +11,18 @@ import std.file;
 import std.typecons: Tuple;
 import std.exception: assertThrown, assertNotThrown, enforce;
 import std.algorithm;
-import std.datetime: StopWatch;
+import std.datetime.stopwatch: StopWatch;
 import std.parallelism;
 import core.thread;
-import mysql.connection;
+import mysql;
 import nwn.gff;
+import nwn.tlk;
 import nwn.twoda;
+import nwnlibd.path;
 
 import lcda.config;
 import lcda.hagbe;
 import lcda.compat.lib_forge_epique;
-
-import nwn.path;
 
 
 
@@ -31,6 +31,8 @@ enum UpdatePolicy{
 	Keep = 1,
 }
 alias ItemPolicy = UpdatePolicy[string];
+
+StrRefResolver tlkresolv;
 
 int main(string[] args){
 	import etc.linux.memoryerror;
@@ -123,6 +125,11 @@ int main(string[] args){
 	enforce(vault.exists && vault.isDir, "Vault is not a directory/does not exist");
 	immutable temp = tempOvr !is null? tempOvr : buildPath(LcdaConfig["path_nwn2docs"], "itemupdater_tmp");
 
+	// TLK resolving
+	tlkresolv = new StrRefResolver(
+		new Tlk(buildPath(LcdaConfig["path_tlk_main"])),
+		new Tlk(buildPath(LcdaConfig["path_tlk_lcda"])),
+	);
 
 	alias UpdateTarget = Tuple!(Gff,"gff", ItemPolicy,"policy");
 	UpdateTarget[string] updateResref;
@@ -174,14 +181,18 @@ int main(string[] args){
 	StopWatch bench;
 	auto taskPool = new TaskPool(parallelJobs-1);
 	scope(exit) taskPool.finish;
-	auto conn = skipSql? null : new Connection(
+	auto connPool = skipSql? null : new MySQLPool(
 		LcdaConfig["sql_address"],
 		LcdaConfig["sql_user"],
 		LcdaConfig["sql_password"],
-		LcdaConfig["sql_schema"]);
-	scope(exit){
-		if(!skipSql)
-			conn.close();
+		LcdaConfig["sql_schema"]
+	);
+	Connection conn1 = null;
+	if(connPool !is null){
+		connPool.onNewConnection = delegate(conn){
+			conn.exec("SET autocommit=0");
+		};
+		conn1 = connPool.lockConnection();
 	}
 
 	if(dryRun == false){
@@ -328,7 +339,7 @@ int main(string[] args){
 
 		}
 		bench.stop;
-		writeln(">>> ",bench.peek.msecs/1000.0," seconds");
+		writeln(">>> ",bench.peek.total!"msecs"/1000.0," seconds");
 	}
 
 
@@ -346,23 +357,14 @@ int main(string[] args){
 		immutable casierIbeeBackup = buildPath(temp, "backup_casieribee");
 		casierIbeeBackup.mkdirRecurse;
 
-		Command(conn, "SET autocommit=0").execSQL;
 		ulong affectedRows;
-
-		void refundInBank(string account, int amount){
-			auto cmdRefund = Command(conn, "UPDATE account SET ibee_bank=(ibee_bank+?) WHERE name=?");
-			cmdRefund.prepare;
-			cmdRefund.bindParameterTuple(amount, account);
-			cmdRefund.execPrepared(affectedRows);
-			enforce(affectedRows==1, "Wrong number of rows affected by SQL query");
-		}
 
 
 		void UpdateSQL(string type)(){
 			static if(type == "coffreibee")
-				auto res = Command(conn, "SELECT id, item_name, account_name, item_data FROM coffreibee").execSQLResult;
+				auto res = connPool.lockConnection().query("SELECT id, item_name, account_name, item_data FROM coffreibee");
 			else static if(type == "casieribee")
-				auto res = Command(conn, "SELECT id, item_name, vendor_account_name, item_data FROM casieribee WHERE active=1").execSQLResult;
+				auto res = connPool.lockConnection().query("SELECT id, item_name, vendor_account_name, item_data FROM casieribee WHERE active=1");
 			else static assert(0);
 
 			foreach(row ; res){
@@ -387,38 +389,44 @@ int main(string[] args){
 					else if(dryRun == false){
 						bool firstUpdate = itemName.indexOf("<b><c=red>MAJ</c></b>") == -1;
 
+						auto conn = connPool.lockConnection();
+
 						//Update item data
 						static if(type == "coffreibee"){
 							//Item will be updated and name will be changed
-							auto cmdUpdate = Command(conn,
-									"UPDATE coffreibee SET"
-										~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
-										~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
-										~" item_data=?"
-									~" WHERE id=?");
+							auto affectedRows = conn.exec(
+								"UPDATE coffreibee SET"
+									~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
+									~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
+									~" item_data=?"
+								~" WHERE id=?",
+								updatedData, id,
+							);
 						}
 						else static if(type == "casieribee"){
 							//Item will be updated and marked as forbidden to sell (do not appear in list) and can be retrieved by the owner
-							auto cmdUpdate = Command(conn,
-									"UPDATE casieribee SET"
-										~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
-										~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
-										~" sale_allowed=0,"
-										~" item_data=?"
-									~" WHERE id=?");
+							auto affectedRows = conn.exec(
+								"UPDATE casieribee SET"
+									~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
+									~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
+									~" sale_allowed=0,"
+									~" item_data=?"
+								~" WHERE id=?",
+								updatedData, id,
+							);
 						}
 						else static assert(0);
 
-						cmdUpdate.prepare;
-						cmdUpdate.bindParameterTuple(updatedData, id);
-						cmdUpdate.execPrepared(affectedRows);
 						enforce(affectedRows==1, "Wrong number of rows affected by SQL query: "~affectedRows.to!string~" rows affected for item ID="~id.to!string);
 
 						if(update.refund > 0){
 							//Apply refund in bank
-							refundInBank(owner, update.refund);
+							affectedRows = conn.exec(
+								"UPDATE account SET ibee_bank=(ibee_bank+?) WHERE name=?",
+								update.refund, owner,
+							);
+							enforce(affectedRows==1, "Wrong number of rows affected by SQL query");
 						}
-
 
 						static if(type == "coffreibee")
 							buildPath(coffreIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
@@ -444,7 +452,7 @@ int main(string[] args){
 		UpdateSQL!"casieribee";
 		bench.stop;
 
-		writeln(">>> ",bench.peek.msecs/1000.0," seconds");
+		writeln(">>> ",bench.peek.total!"msecs"/1000.0," seconds");
 	}
 
 
@@ -501,7 +509,12 @@ int main(string[] args){
 
 		//SQL commit
 		if(!skipSql){
-			Command(conn, "COMMIT").execSQL;
+			//conn.exec("COMMIT");
+			auto conns = [conn1];
+			while(conns[$-1].lastCommandID != 0){
+				conns[$-1].exec("COMMIT");
+				conns ~= connPool.lockConnection();
+			}
 			writeln("SQL work commited");
 			stdout.flush();
 		}
@@ -513,8 +526,14 @@ int main(string[] args){
 
 
 	//SQL rollback
-	if(!skipSql && dryRun == false)
-		Command(conn, "ROLLBACK").execSQL;
+	if(!skipSql && dryRun == false){
+		//conn.exec("ROLLBACK");
+		auto conns = [conn1];
+		while(conns[$-1].lastCommandID != 0){
+			conns[$-1].exec("ROLLBACK");
+			conns ~= connPool.lockConnection();
+		}
+	}
 
 
 	return 0;
@@ -646,7 +665,7 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 	if(enchanted){
 		enforce(enchantment>0, "Wrong enchantment ID: "~enchantment.to!string);
 
-		try updatedItem.enchantItem(enchantment);
+		try updatedItem.enchantItem(enchantment, tlkresolv);
 		catch(EnchantmentException e){
 			stderr.writeln("\x1b[1;31mWARNING: ",ownerName,":",updatedItem["Tag"].to!string,": ",e.msg, " - Enchantment refunded\x1b[m");
 

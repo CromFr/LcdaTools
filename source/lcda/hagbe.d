@@ -3,8 +3,10 @@ module lcda.hagbe;
 import std.stdint;
 import std.conv;
 import std.exception;
+import std.string: indexOf;
 import nwn.gff;
 import nwn.twoda;
+import nwn.tlk: StrRefResolver;
 import lcda.config: getTwoDA;
 import lcda.compat.lib_forge_epique;
 
@@ -183,7 +185,22 @@ class EnchantmentException : Exception{
 	}
 }
 
-void enchantItem(ref GffNode item, EnchantmentId enchantType){
+void addEnchantmentSuffix(ref GffNode item, in StrRefResolver tlkResolver){
+
+	auto locName = tlkResolver[item["LocalizedName"]];
+	if(locName.indexOf("<c=#7428FF>*</c>") == -1){
+		auto locStr = &item["LocalizedName"].as!(GffType.ExoLocString)();
+
+		if(locStr.strings.length > 0){
+			foreach(lang, ref str ; locStr.strings)
+				str ~= " <c=#7428FF>*</c>";
+		}
+		else
+			locStr.strings[0] = locName ~ " <c=#7428FF>*</c>";
+	}
+}
+
+void enchantItem(ref GffNode item, EnchantmentId enchantType, in StrRefResolver tlkResolver){
 	GffNode* findExistingProperty(in PropType propType){
 		foreach(ref prop ; item["PropertiesList"].as!(GffType.List)){
 			if(prop["PropertyName"].as!(GffType.Word) == propType.propertyName
@@ -192,6 +209,7 @@ void enchantItem(ref GffNode item, EnchantmentId enchantType){
 		}
 		return null;
 	}
+
 
 	auto baseItemType = item["BaseItem"].to!uint;
 	immutable propertyType = getPropertyType(baseItemType, enchantType);
@@ -215,6 +233,8 @@ void enchantItem(ref GffNode item, EnchantmentId enchantType){
 				"Enchantment "~propertyType.toString~" already exist on the updated version");
 
 			item["PropertiesList"].as!(GffType.List) ~= buildPropertyUsing2DA(propertyType);
+
+			addEnchantmentSuffix(item, tlkResolver);
 			return;
 
 		default:
@@ -256,6 +276,8 @@ void enchantItem(ref GffNode item, EnchantmentId enchantType){
 				//append
 				item["PropertiesList"].as!(GffType.List) ~= buildPropertyUsing2DA(propertyType);
 			}
+
+			addEnchantmentSuffix(item, tlkResolver);
 			return;
 	}
 	assert(0);

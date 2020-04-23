@@ -1,6 +1,6 @@
 module lcda.compat.lib_forge_epique;
 
-import nwn.constants;
+import lcda.constants;
 import std.conv: to;
 
 
