@@ -4,6 +4,9 @@
 	"path_lcdadev": "C:\\Users\\Crom\\Documents\\Neverwinter Nights 2\\modules\\LcdaDev",
 	"path_lcdaclientsrc": "C:\\Users\\Crom\\Documents\\Neverwinter Nights 2\\override\\LcdaClientSrc",
 
+	"path_tlk_main": "C:\\Program Files (x86)\\Neverwinter Nights 2\\dialog.tlk",
+	"path_tlk_lcda": "C:\\Users\\Crom\\Documents\\Neverwinter Nights 2\\tlk\\lcda.tlk",
+
 	"sql_address": "127.0.0.1",
 	"sql_port": "3306",
 	"sql_user": "root",

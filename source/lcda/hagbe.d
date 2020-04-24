@@ -185,19 +185,32 @@ class EnchantmentException : Exception{
 	}
 }
 
-void addEnchantmentSuffix(ref GffNode item, in StrRefResolver tlkResolver){
+bool addEnchantmentSuffix(ref GffNode item, in StrRefResolver tlkResolver){
 
 	auto locName = tlkResolver[item["LocalizedName"]];
-	if(locName.indexOf("<c=#7428FF>*</c>") == -1){
+	if(locName.indexOf("<c=#9257FF>*</c>") == -1){
 		auto locStr = &item["LocalizedName"].as!(GffType.ExoLocString)();
 
 		if(locStr.strings.length > 0){
 			foreach(lang, ref str ; locStr.strings)
-				str ~= " <c=#7428FF>*</c>";
+				str ~= " <c=#9257FF>*</c>";
 		}
 		else
-			locStr.strings[0] = locName ~ " <c=#7428FF>*</c>";
+			locStr.strings[0] = locName ~ " <c=#9257FF>*</c>";
+		return true;
 	}
+	return false;
+}
+
+bool isEnchanted(in GffNode item){
+	if("VarTable" in item.as!(GffType.Struct)){
+		foreach(ref var ; item["VarTable"].as!(GffType.List)){
+			if(var["Name"].as!(GffType.ExoString) == "DEJA_ENCHANTE" && var["Value"].as!(GffType.Int) == 1){
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 void enchantItem(ref GffNode item, EnchantmentId enchantType, in StrRefResolver tlkResolver){
