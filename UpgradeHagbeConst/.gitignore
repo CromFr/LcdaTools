@@ -1,0 +1,16 @@
+.dub
+docs.json
+__dummy.html
+docs/
+upgradehagbeconst.so
+upgradehagbeconst.dylib
+upgradehagbeconst.dll
+upgradehagbeconst.a
+upgradehagbeconst.lib
+upgradehagbeconst-test-*
+*.exe
+*.o
+*.obj
+*.lst
+
+upgradehagbeconst*

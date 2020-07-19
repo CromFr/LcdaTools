@@ -1,0 +1,10 @@
+name "upgradehagbeconst"
+description "Converts old hagbe enchantment constants to new ones"
+license "GPL-3.0"
+copyright "Copyright © 2020, Thibaut CHARLES"
+authors "Thibaut CHARLES"
+
+dependency "nwn-lib-d" version="~>0.0.7"
+dependency "mysql-native" version="~>3.0.0"
+
+sourcePaths "source" "../source"
