@@ -1,0 +1,15 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/adjust-item-prices
+adjust-item-prices.so
+adjust-item-prices.dylib
+adjust-item-prices.dll
+adjust-item-prices.a
+adjust-item-prices.lib
+adjust-item-prices-test-*
+*.exe
+*.o
+*.obj
+*.lst
