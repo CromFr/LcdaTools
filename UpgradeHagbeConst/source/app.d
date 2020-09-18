@@ -4,29 +4,16 @@ import std.getopt;
 import std.string;
 import std.stdint;
 import std.conv;
-//import std.path;
-//import std.array;
-//import std.file;
-//	alias write = std.stdio.write;
-//	alias writeFile = std.file.write;
 import std.typecons: Tuple;
 import std.exception: assertThrown, assertNotThrown, enforce;
 import std.algorithm;
-//import std.datetime.stopwatch: StopWatch;
-//import std.parallelism;
-//import core.thread;
 
-//import mysql;
-
-//import nwn.twoda;
-//import nwn.tlk;
-//import nwnlibd.path;
 import nwn.gff;
 
 import lcda.config;
 import lcda.util;
 import lcda.hagbe;
-import lcda.compat.lib_forge_epique: EnchantmentId;
+import lcda.compat.lib_forge_epique;
 
 import item_processor;
 
@@ -76,8 +63,12 @@ int main(string[] args){
 					break;
 			}
 		}
+		if(oldConst <= 0){
+			stderr.writeln("\x1b[1;31mWARNING: Item '", item["TemplateResRef"].to!string, "' has an invalid X2_LAST_PROPERTY value " ~ oldConst.to!string ~ "\x1b[m");
+			return false;
+		}
 
-		if(enchanted && oldConst != int32_t.max && oldConst > 0){
+		if(enchanted && oldConst != int32_t.max){
 			auto ench = oldConst.to!EnchantmentId;
 
 			GffNode[] newVarTable;
@@ -91,7 +82,7 @@ int main(string[] args){
 				}
 			}
 
-			auto iprp = getPropertyType(GetBaseItemType(item), ench);
+			auto iprp = legacyConstToIprp(GetBaseItemType(item), ench);
 			newVarTable ~= LocalVar("hagbe_iprp_t", GffType.Int, iprp.type);
 			newVarTable ~= LocalVar("hagbe_iprp_st", GffType.Int, iprp.subType);
 			newVarTable ~= LocalVar("hagbe_iprp_c", GffType.Int, iprp.costValue);

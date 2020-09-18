@@ -19,11 +19,12 @@ import mysql;
 import nwn.gff;
 import nwn.tlk;
 import nwn.twoda;
+import nwn.nwscript;
 import nwnlibd.path;
 
 import lcda.config;
 import lcda.hagbe;
-import lcda.compat.lib_forge_epique;
+import lcda.compat.hagbe_inc;
 
 
 
@@ -134,20 +135,25 @@ int main(string[] args){
 	UpdateTarget[string] updateResref;
 	UpdateTarget[string] updateTag;
 
+	bool errored = false;
 	foreach(ref bpu ; resrefupdateDef){
 		auto bpPath = bpu.blueprint.extension is null?
 			buildPathCI(LcdaConfig["path_lcdadev"], bpu.blueprint~".uti") : bpu.blueprint;
 		auto gff = new Gff(bpPath);
 
 		if(bpu.from !is null && bpu.from.length>0){
-			enforce(bpu.from !in updateResref,
-				"Template resref '"~bpu.from~"' already registered. Cannot add blueprint '"~bpu.blueprint~"'");
+			if(bpu.from in updateResref){
+				stderr.writeln("\x1b[1;31mERROR: Template resref '"~bpu.from~"' already registered. Cannot add blueprint '"~bpu.blueprint~".uti'\x1b[m");
+				errored = true;
+			}
 			updateResref[bpu.from] = UpdateTarget(gff, bpu.policy);
 		}
 		else{
 			immutable tplResref = gff["TemplateResRef"].as!(GffType.ResRef);
-			enforce(tplResref !in updateResref,
-				"Template resref '"~tplResref~"' already registered. Cannot add blueprint '"~bpu.blueprint~"'");
+			if(tplResref in updateResref){
+				stderr.writeln("\x1b[1;31mERROR: Template resref '"~tplResref~"' already registered. Cannot add blueprint '"~bpu.blueprint~".uti'\x1b[m");
+				errored = true;
+			}
 			updateResref[tplResref] = UpdateTarget(gff, bpu.policy);
 		}
 	}
@@ -157,17 +163,22 @@ int main(string[] args){
 		auto gff = new Gff(bpPath);
 
 		if(bpu.from !is null && bpu.from.length>0){
-			enforce(bpu.from !in updateTag,
-				"Tag '"~bpu.from~"' already registered. Cannot add blueprint '"~bpu.blueprint~"'");
+			if(bpu.from in updateTag){
+				stderr.writeln("\x1b[1;31mERROR: Tag '"~bpu.from~"' already registered. Cannot add blueprint '"~bpu.blueprint~".uti'\x1b[m");
+				errored = true;
+			}
 			updateTag[bpu.from] = UpdateTarget(gff, bpu.policy);
 		}
 		else{
 			immutable tag = gff["Tag"].as!(GffType.ResRef);
-			enforce(tag !in updateTag,
-				"Tag '"~tag~"' already registered. Cannot add blueprint '"~bpu.blueprint~"'");
+			if(tag in updateTag){
+				stderr.writeln("\x1b[1;31mERROR: Tag '"~tag~"' already registered. Cannot add blueprint '"~bpu.blueprint~".uti'\x1b[m");
+				errored = true;
+			}
 			updateTag[tag] = UpdateTarget(gff, bpu.policy);
 		}
 	}
+	enforce(!errored, "There was some update errors");
 
 	enforce(updateResref.length>0 || updateTag.length>0,
 		"Nothing to update. Use --update or --update-tag");
@@ -551,9 +562,6 @@ int main(string[] args){
 
 ///
 auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPolicy, lazy string ownerName, in StrRefResolver tlkresolv){
-	bool enchanted = false;
-	EnchantmentId enchantment;
-
 	GffNode updatedItem = blueprint.dup;
 	updatedItem.structType = 0;
 
@@ -564,7 +572,7 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 	updatedItem.as!(GffType.Struct).remove("ItemRcvShadow");
 	updatedItem.as!(GffType.Struct).remove("UVScroll");
 
-	void copyPropertyIfPresent(in GffNode oldItem, ref GffNode updatedItem, string property){
+	static void copyPropertyIfPresent(in GffNode oldItem, ref GffNode updatedItem, string property){
 		if(auto node = property in oldItem.as!(GffType.Struct))
 			updatedItem.appendField(node.dup);
 	}
@@ -615,6 +623,8 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 	foreach(i, ref var ; updatedItem["VarTable"].as!(GffType.List))
 		varsInUpdatedItem[var["Name"].as!(GffType.ExoString)] = i;
 
+	bool enchanted = false;
+	NWItemproperty enchIprp;
 	foreach(ref oldItemVar ; oldItem["VarTable"].as!(GffType.List)){
 		immutable name = oldItemVar["Name"].to!string;
 
@@ -622,14 +632,18 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 		if(auto p = ("Var."~name) in itemPolicy)
 			policy = *p;
 
+		if(name[0..11] == "hagbe_iprp_"){
+			switch(name){
+				case "hagbe_iprp_t":  enchIprp.type      = oldItemVar["Value"].to!int32_t; break;
+				case "hagbe_iprp_st": enchIprp.subType   = oldItemVar["Value"].to!int32_t; break;
+				case "hagbe_iprp_c":  enchIprp.costValue = oldItemVar["Value"].to!int32_t; break;
+				case "hagbe_iprp_p1": enchIprp.p1        = oldItemVar["Value"].to!int32_t; break;
+				default: throw new Exception("Unknown hagbe var " ~ name);
+			}
+		}
 
 		if(name=="DEJA_ENCHANTE")
-			enchanted   = oldItemVar["Value"].to!bool;
-		else if(name=="X2_LAST_PROPERTY"){
-			auto val = oldItemVar["Value"].as!(GffType.Int);
-			if(val>0)
-				enchantment = val.to!EnchantmentId;
-		}
+			enchanted = oldItemVar["Value"].to!bool;
 
 		if(auto idx = name in varsInUpdatedItem){
 			//Var is in updatedItem (inherited from blueprint)
@@ -672,15 +686,13 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 	//Enchantment
 	int refund = 0;
 	if(enchanted){
-		enforce(enchantment>0, "Wrong enchantment ID: "~enchantment.to!string);
-
-		try updatedItem.enchantItem(enchantment, tlkresolv);
-		catch(EnchantmentException e){
-			stderr.writeln("\x1b[1;31mWARNING: ",ownerName,":",updatedItem["Tag"].to!string,": ",e.msg, " - Enchantment refunded\x1b[m");
+		auto res = EnchantItem(updatedItem.as!(GffType.Struct), enchIprp);
+		if(!res){
+			stderr.writeln("\x1b[1;31mWARNING: ",ownerName,":",updatedItem["Tag"].to!string,": cannot re-enchant with "~enchIprp.toPrettyString~" - Enchantment refunded\x1b[m");
 
 			//Refund enchantment
-			refund = PrixDuService(enchantment);
-			assert(refund != 0);
+			refund = GetEnchantmentCost(updatedItem.as!(GffType.Struct), enchIprp);
+			enforce(refund > 0 && refund < 1000000000, "Bad refund cost");
 
 
 			//Remove enchantment variables

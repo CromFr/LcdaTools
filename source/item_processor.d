@@ -25,7 +25,6 @@ import nwn.tlk;
 import nwnlibd.path;
 
 import lcda.config;
-import lcda.hagbe: isEnchanted, addEnchantmentSuffix;
 
 
 struct ItemProcessorConfig {
@@ -167,7 +166,7 @@ int processAllItems(in ItemProcessorConfig cfg, bool delegate(ref GffNode node) 
 
 				const newData = character.serialize;
 				if(oldData == newData){
-					writeln("\x1b[1;31mWARNING: Character ", charPathRelative, " did not change after update (modified item resrefs: ", modifiedResrefs, "\x1b[m");
+					writeln("\x1b[1;31mWARNING: Character ", charPathRelative, " did not change after update (modified item resrefs: ", modifiedResrefs, ")\x1b[m");
 					stdout.flush();
 				}
 				else{

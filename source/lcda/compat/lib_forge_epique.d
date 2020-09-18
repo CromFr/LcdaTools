@@ -1,3 +1,4 @@
+// LEGACY hagbe stuff
 module lcda.compat.lib_forge_epique;
 
 import lcda.constants;
@@ -186,7 +187,20 @@ const int IP_CONST_WS_MIGHTY_20 = 19124;
 
 
 
-
+enum IP_CONST_DAMAGETYPE_BLUDGEONING             = 0;
+enum IP_CONST_DAMAGETYPE_PIERCING                = 1;
+enum IP_CONST_DAMAGETYPE_SLASHING                = 2;
+enum IP_CONST_DAMAGETYPE_SUBDUAL                 = 3;
+enum IP_CONST_DAMAGETYPE_PHYSICAL                = 4;
+enum IP_CONST_DAMAGETYPE_MAGICAL                 = 5;
+enum IP_CONST_DAMAGETYPE_ACID                    = 6;
+enum IP_CONST_DAMAGETYPE_COLD                    = 7;
+enum IP_CONST_DAMAGETYPE_DIVINE                  = 8;
+enum IP_CONST_DAMAGETYPE_ELECTRICAL              = 9;
+enum IP_CONST_DAMAGETYPE_FIRE                    = 10;
+enum IP_CONST_DAMAGETYPE_NEGATIVE                = 11;
+enum IP_CONST_DAMAGETYPE_POSITIVE                = 12;
+enum IP_CONST_DAMAGETYPE_SONIC                   = 13;
 
 
 
