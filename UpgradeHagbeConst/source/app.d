@@ -74,7 +74,6 @@ int main(string[] args){
 			GffNode[] newVarTable;
 			foreach(ref var ; item["VarTable"].as!(GffType.List)){
 				switch(var["Name"].to!string){
-					case "DEJA_ENCHANTE":
 					case "X2_LAST_PROPERTY":
 						break;
 					default:
