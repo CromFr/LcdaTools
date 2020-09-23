@@ -23,7 +23,6 @@ import nwn.nwscript;
 import nwnlibd.path;
 
 import lcda.config;
-import lcda.hagbe;
 import lcda.compat.hagbe_inc;
 
 
@@ -594,6 +593,9 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 	copyPropertyIfPresent(oldItem, updatedItem, "YPosition");
 	copyPropertyIfPresent(oldItem, updatedItem, "ZOrientation");
 	copyPropertyIfPresent(oldItem, updatedItem, "ZPosition");
+
+	// Keep cursed flag by default
+	copyPropertyIfPresent(oldItem, updatedItem, "Cursed");
 
 	//Set instance properties that must persist through updates
 	//updatedItem["Dropable"] = oldItem["Dropable"].dup;

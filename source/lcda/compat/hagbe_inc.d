@@ -5,7 +5,6 @@ import std.conv;
 import nwn.gff;
 
 import lcda.constants;
-import lcda.hagbe;
 import lcda.compat.x2_inc_itemprop;
 
 import nwn.nwscript;

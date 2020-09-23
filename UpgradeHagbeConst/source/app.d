@@ -12,7 +12,6 @@ import nwn.gff;
 
 import lcda.config;
 import lcda.util;
-import lcda.hagbe;
 import lcda.compat.lib_forge_epique;
 
 import item_processor;
@@ -86,6 +85,7 @@ int main(string[] args){
 			newVarTable ~= LocalVar("hagbe_iprp_st", GffType.Int, iprp.subType);
 			newVarTable ~= LocalVar("hagbe_iprp_c", GffType.Int, iprp.costValue);
 			newVarTable ~= LocalVar("hagbe_iprp_p1", GffType.Int, iprp.p1);
+			newVarTable ~= LocalVar("hagbe_cost", GffType.Int, PrixDuService(ench));
 
 			item["VarTable"].as!(GffType.List) = newVarTable;
 

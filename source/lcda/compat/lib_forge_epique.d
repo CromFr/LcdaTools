@@ -1,6 +1,7 @@
 // LEGACY hagbe stuff
-module lcda.compat.lib_forge_epique;
+deprecated module lcda.compat.lib_forge_epique;
 
+import nwn.types;
 import lcda.constants;
 import std.conv: to;
 
@@ -361,4 +362,154 @@ int PrixDuService(int nService)
 			default: assert(0, "Could not get gold value for enchantment id="~nService.to!string);
 		}
 	return nGoldNeed;
+}
+
+
+
+
+
+
+
+
+NWItemproperty legacyConstToIprp(uint baseItemType, EnchantmentId enchantType){
+	//Indices are found in itempropdef.2da
+	final switch(enchantType) with(EnchantmentId){
+		case DAMAGETYPE_ACID:
+		case DAMAGETYPE_SONIC:
+		case DAMAGETYPE_FIRE:
+		case DAMAGETYPE_COLD:
+		case DAMAGETYPE_ELECTRICAL:
+		case DAMAGETYPE_NEGATIVE:
+		case DAMAGETYPE_POSITIVE:
+		case DAMAGETYPE_DIVINE:                     return NWItemproperty(16, enchantType, 7);//7 is for 1d6
+		case ARMOR_STRENGTH_BONUS2:                 return NWItemproperty(0,  0,           2);
+		case ARMOR_DEXTERITY_BONUS2:                return NWItemproperty(0,  1,           2);
+		case ARMOR_CONSTITUTION_BONUS2:             return NWItemproperty(0,  2,           2);
+		case ARMOR_INTELLIGENCE_BONUS2:             return NWItemproperty(0,  3,           2);
+		case ARMOR_WISDOM_BONUS2:                   return NWItemproperty(0,  4,           2);
+		case ARMOR_CHARISMA_BONUS2:                 return NWItemproperty(0,  5,           2);
+		case BRACERS_BELT_STRENGTH_BONUS2:          return NWItemproperty(0,  0,           2);
+		case BRACERS_BELT_DEXTERITY_BONUS2:         return NWItemproperty(0,  1,           2);
+		case BRACERS_BELT_CONSTITUTION_BONUS2:      return NWItemproperty(0,  2,           2);
+		case BRACERS_BELT_INTELLIGENCE_BONUS2:      return NWItemproperty(0,  3,           2);
+		case BRACERS_BELT_WISDOM_BONUS2:            return NWItemproperty(0,  4,           2);
+		case BRACERS_BELT_CHARISMA_BONUS2:          return NWItemproperty(0,  5,           2);
+		case HELM_STRENGTH_BONUS2:                  return NWItemproperty(0,  0,           2);
+		case HELM_DEXTERITY_BONUS2:                 return NWItemproperty(0,  1,           2);
+		case HELM_CONSTITUTION_BONUS2:              return NWItemproperty(0,  2,           2);
+		case HELM_INTELLIGENCE_BONUS2:              return NWItemproperty(0,  3,           2);
+		case HELM_WISDOM_BONUS2:                    return NWItemproperty(0,  4,           2);
+		case HELM_CHARISMA_BONUS2:                  return NWItemproperty(0,  5,           2);
+		case AMULET_STRENGTH_BONUS2:                return NWItemproperty(0,  0,           2);
+		case AMULET_DEXTERITY_BONUS2:               return NWItemproperty(0,  1,           2);
+		case AMULET_CONSTITUTION_BONUS2:            return NWItemproperty(0,  2,           2);
+		case AMULET_INTELLIGENCE_BONUS2:            return NWItemproperty(0,  3,           2);
+		case AMULET_WISDOM_BONUS2:                  return NWItemproperty(0,  4,           2);
+		case AMULET_CHARISMA_BONUS2:                return NWItemproperty(0,  5,           2);
+		case RING_STRENGTH_BONUS2:                  return NWItemproperty(0,  0,           2);
+		case RING_DEXTERITY_BONUS2:                 return NWItemproperty(0,  1,           2);
+		case RING_CONSTITUTION_BONUS2:              return NWItemproperty(0,  2,           2);
+		case RING_INTELLIGENCE_BONUS2:              return NWItemproperty(0,  3,           2);
+		case RING_WISDOM_BONUS2:                    return NWItemproperty(0,  4,           2);
+		case RING_CHARISMA_BONUS2:                  return NWItemproperty(0,  5,           2);
+		case BOOTS_STRENGTH_BONUS2:                 return NWItemproperty(0,  0,           2);
+		case BOOTS_DEXTERITY_BONUS2:                return NWItemproperty(0,  1,           2);
+		case BOOTS_CONSTITUTION_BONUS2:             return NWItemproperty(0,  2,           2);
+		case BOOTS_INTELLIGENCE_BONUS2:             return NWItemproperty(0,  3,           2);
+		case BOOTS_WISDOM_BONUS2:                   return NWItemproperty(0,  4,           2);
+		case BOOTS_CHARISMA_BONUS2:                 return NWItemproperty(0,  5,           2);
+		case CLOAK_STRENGTH_BONUS2:                 return NWItemproperty(0,  0,           2);
+		case CLOAK_DEXTERITY_BONUS2:                return NWItemproperty(0,  1,           2);
+		case CLOAK_CONSTITUTION_BONUS2:             return NWItemproperty(0,  2,           2);
+		case CLOAK_INTELLIGENCE_BONUS2:             return NWItemproperty(0,  3,           2);
+		case CLOAK_WISDOM_BONUS2:                   return NWItemproperty(0,  4,           2);
+		case CLOAK_CHARISMA_BONUS2:                 return NWItemproperty(0,  5,           2);
+		case SHIELD_STRENGTH_BONUS2:                return NWItemproperty(0,  0,           2);
+		case SHIELD_DEXTERITY_BONUS2:               return NWItemproperty(0,  1,           2);
+		case SHIELD_CONSTITUTION_BONUS2:            return NWItemproperty(0,  2,           2);
+		case SHIELD_INTELLIGENCE_BONUS2:            return NWItemproperty(0,  3,           2);
+		case SHIELD_WISDOM_BONUS2:                  return NWItemproperty(0,  4,           2);
+		case SHIELD_CHARISMA_BONUS2:                return NWItemproperty(0,  5,           2);
+		case ARMOR_BONUS_CA2:                       return NWItemproperty(1,  -1,          2);
+		case CLOAK_PARADE_BONUS2:                   return NWItemproperty(1,  -1,          2);
+		case BRACERS_BELT_CA_VS_BLUDGEONING_BONUS5: return NWItemproperty(3,  0,           5);
+		case BRACERS_BELT_CA_VS_PIERCING_BONUS5:    return NWItemproperty(3,  1,           5);
+		case BRACERS_BELT_CA_VS_SLASHING_BONUS5:    return NWItemproperty(3,  2,           5);
+		case ENHANCEMENT_BONUS:                     return NWItemproperty(6,  -1,          1);
+		case ENHANCEMENT_BONUS2:                    return NWItemproperty(6,  -1,          2);
+		case HELM_DAMAGERESISTANCE5_BLUDGEONING:    return NWItemproperty(23, 0,           1);
+		case HELM_DAMAGERESISTANCE5_PIERCING:       return NWItemproperty(23, 1,           1);
+		case HELM_DAMAGERESISTANCE5_SLASHING:       return NWItemproperty(23, 2,           1);
+		case HELM_DAMAGERESISTANCE5_MAGICAL:        return NWItemproperty(23, 5,           1);
+		case HELM_DAMAGERESISTANCE5_ACID:           return NWItemproperty(23, 6,           1);
+		case HELM_DAMAGERESISTANCE5_COLD:           return NWItemproperty(23, 7,           1);
+		case HELM_DAMAGERESISTANCE5_DIVINE:         return NWItemproperty(23, 8,           1);
+		case HELM_DAMAGERESISTANCE5_ELECTRICAL:     return NWItemproperty(23, 9,           1);
+		case HELM_DAMAGERESISTANCE5_FIRE:           return NWItemproperty(23, 10,          1);
+		case HELM_DAMAGERESISTANCE5_NEGATIVE:       return NWItemproperty(23, 11,          1);
+		case HELM_DAMAGERESISTANCE5_POSITIVE:       return NWItemproperty(23, 12,          1);
+		case HELM_DAMAGERESISTANCE5_SONIC:          return NWItemproperty(23, 13,          1);
+		case BOOTS_DARKVISION:                      return NWItemproperty(26);
+		case HASTE:                                 return NWItemproperty(35);
+		case RING_IMMUNE_ABSORBTION:                return NWItemproperty(37, 1);
+		case RING_IMMUNE_TERROR:                    return NWItemproperty(37, 5);
+		case RING_IMMUNE_DEATH:                     return NWItemproperty(37, 9);
+		case SPELLRESISTANCE:                       return NWItemproperty(39, -1,          0);//+10
+		case SHIELD_SPELLRESISTANCE10:              return NWItemproperty(39, -1,          0);//+10
+		case SHIELD_BONUS_VIG_PLUS7:                return NWItemproperty(41, 1,           7);
+		case SHIELD_BONUS_VOL_PLUS7:                return NWItemproperty(41, 2,           7);
+		case SHIELD_BONUS_REF_PLUS7:                return NWItemproperty(41, 3,           7);
+		case KEEN:                                  return NWItemproperty(43);
+		case MIGHTY_5:                              return NWItemproperty(45, -1,          5);
+		case MIGHTY_10:                             return NWItemproperty(45, -1,          10);
+		case MIGHTY_15:                             return NWItemproperty(45, -1,          15);
+		case MIGHTY_20:                             return NWItemproperty(45, -1,          20);
+		case REGENERATION:                          return NWItemproperty(51, -1,          2);
+		case BOOTS_REGENERATION1:                   return NWItemproperty(51, -1,          2);
+		case SHIELD_REGENERATION1:                  return NWItemproperty(51, -1,          2);
+		case AMULET_SKILL_CONCENTRATION_BONUS15:    return NWItemproperty(52, 1,           15);
+		case AMULET_SKILL_DISABLE_TRAP_BONUS15:     return NWItemproperty(52, 2,           15);
+		case AMULET_SKILL_DISCIPLINE_BONUS15:       return NWItemproperty(52, 3,           15);
+		case AMULET_SKILL_HEAL_BONUS15:             return NWItemproperty(52, 4,           15);
+		case AMULET_SKILL_HIDE_BONUS15:             return NWItemproperty(52, 5,           15);
+		case AMULET_SKILL_LISTEN_BONUS15:           return NWItemproperty(52, 6,           15);
+		case AMULET_SKILL_LORE_BONUS15:             return NWItemproperty(52, 7,           15);
+		case AMULET_SKILL_MOVE_SILENTLY_BONUS15:    return NWItemproperty(52, 8,           15);
+		case AMULET_SKILL_OPEN_LOCK_BONUS15:        return NWItemproperty(52, 9,           15);
+		case AMULET_SKILL_PARRY_BONUS15:            return NWItemproperty(52, 10,          15);
+		case AMULET_SKILL_PERFORM_BONUS15:          return NWItemproperty(52, 11,          15);
+		case AMULET_SKILL_DIPLOMACY_BONUS15:        return NWItemproperty(52, 12,          15);
+		case AMULET_SKILL_PERSUADE_BONUS15:         return NWItemproperty(52, 12,          15);//Diplomacy
+		case AMULET_SKILL_SLEIGHT_OF_HAND_BONUS15:  return NWItemproperty(52, 13,          15);
+		case AMULET_SKILL_PICK_POCKET_BONUS15:      return NWItemproperty(52, 13,          15);//SleightOfHand
+		case AMULET_SKILL_SEARCH_BONUS15:           return NWItemproperty(52, 14,          15);
+		case AMULET_SKILL_SET_TRAP_BONUS15:         return NWItemproperty(52, 15,          15);
+		case AMULET_SKILL_SPELLCRAFT_BONUS15:       return NWItemproperty(52, 16,          15);
+		case AMULET_SKILL_SPOT_BONUS15:             return NWItemproperty(52, 17,          15);
+		case AMULET_SKILL_TAUNT_BONUS15:            return NWItemproperty(52, 18,          15);
+		case AMULET_SKILL_USE_MAGIC_DEVICE_BONUS15: return NWItemproperty(52, 19,          15);
+		case AMULET_SKILL_APPRAISE_BONUS15:         return NWItemproperty(52, 20,          15);
+		case AMULET_SKILL_TUMBLE_BONUS15:           return NWItemproperty(52, 21,          15);
+		case AMULET_SKILL_CRAFT_TRAP_BONUS15:       return NWItemproperty(52, 22,          15);
+		case AMULET_SKILL_BLUFF_BONUS15:            return NWItemproperty(52, 23,          15);
+		case AMULET_SKILL_INTIMIDATE_BONUS15:       return NWItemproperty(52, 24,          15);
+		case AMULET_SKILL_CRAFT_ARMOR_BONUS15:      return NWItemproperty(52, 25,          15);
+		case AMULET_SKILL_CRAFT_WEAPON_BONUS15:     return NWItemproperty(52, 26,          15);
+		case AMULET_SKILL_CRAFT_ALCHEMY_BONUS15:    return NWItemproperty(52, 27,          15);
+		case AMULET_SKILL_SURVIVAL_BONUS15:         return NWItemproperty(52, 29,          15);
+		case ATTACK_BONUS:                          return NWItemproperty(56, -1,          1);
+		case ATTACK_BONUS2:                         return NWItemproperty(56, -1,          2);
+		case ATTACK_BONUS3:                         return NWItemproperty(56, -1,          3);
+		case ATTACK_BONUS4:                         return NWItemproperty(56, -1,          4);
+		case UNLIMITED_3:
+			switch(baseItemType){
+				case 8: case 11:                    return NWItemproperty(61, 0,           15);//Bow
+				case 6: case 7:                     return NWItemproperty(61, 1,           15);//XBow
+				case 61:                            return NWItemproperty(61, 2,           15);//Sling
+				default: throw new Exception("Cannot add Unlimited enchantment to item type "~baseItemType.to!string);
+			}
+		case TRUESEEING:                            return NWItemproperty(71);
+		case RING_FREEACTION:                       return NWItemproperty(75);
+		case ARMOR_FREEACTION:                      return NWItemproperty(75);
+	}
 }
