@@ -688,14 +688,13 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 	//Enchantment
 	int refund = 0;
 	if(enchanted){
-		auto res = EnchantItem(updatedItem.as!(GffType.Struct), enchIprp);
+		auto cost = GetLocalInt(updatedItem.as!(GffType.Struct), "hagbe_cost");
+		auto res = EnchantItem(updatedItem.as!(GffType.Struct), enchIprp, cost);
 		if(!res){
 			stderr.writeln("\x1b[1;31mWARNING: ",ownerName,":",updatedItem["Tag"].to!string,": cannot re-enchant with "~enchIprp.toPrettyString~" - Enchantment refunded\x1b[m");
 
 			//Refund enchantment
-			refund = GetEnchantmentCost(updatedItem.as!(GffType.Struct), enchIprp);
-			enforce(refund > 0 && refund < 1000000000, "Bad refund cost");
-
+			refund = cost;
 
 			//Remove enchantment variables
 			foreach_reverse(i, ref var ; updatedItem["VarTable"].as!(GffType.List)){

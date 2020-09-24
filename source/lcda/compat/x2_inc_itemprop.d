@@ -138,3 +138,9 @@ NWInt IPGetItemHasProperty(ref GffStruct oItem, NWItemproperty ipCompareTo, NWIn
     //PrintString ("Not Found");
     return FALSE;
 }
+
+
+void IPRemoveAllItemProperties(ref GffStruct oItem, NWInt nItemPropertyDuration = DURATION_TYPE_TEMPORARY)
+{
+	assert(nItemPropertyDuration == DURATION_TYPE_TEMPORARY, "Not implemented");
+}
