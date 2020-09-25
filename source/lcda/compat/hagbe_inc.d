@@ -140,6 +140,20 @@ EnhanceItemPropertyCostValueRet EnhanceItemPropertyCostValue(NWInt nBaseItemType
 			}
 			break;
 
+		case 25: // IPRP_SKILLCOST
+			// From 1 to 50
+			if(nCostValue + nCostValueBonus <= 50){
+				ret.act = 2;
+				ret.ip_res = BuildItemProperty(nType, nSubType, nCostValue + nCostValueBonus);
+				ret.ip_diff = BuildItemProperty(nType, nSubType, nCostValueBonus);
+			}
+			else if(nCostValue < 50){
+				ret.act = 2;
+				ret.ip_res = BuildItemProperty(nType, nSubType, 50);
+				ret.ip_diff = BuildItemProperty(nType, nSubType, 50 - nCostValue);
+			}
+			break;
+
 		case 27: // IPRP_ARCSPELL
 			{
 				int nCurrValue = StringToInt(Get2DAString("IPRP_ARCSPELL", "Value", nCostValue));

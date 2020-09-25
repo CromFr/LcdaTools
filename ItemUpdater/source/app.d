@@ -129,6 +129,10 @@ int main(string[] args){
 		new Tlk(buildPath(LcdaConfig["path_tlk_main"])),
 		new Tlk(buildPath(LcdaConfig["path_tlk_lcda"])),
 	);
+	initStrRefResolver(tlkresolv);
+
+	// 2da search path
+	initTwoDAPaths([buildPath(LcdaConfig["path_lcdaclientsrc"], "lcda2da.hak")]);
 
 	alias UpdateTarget = Tuple!(Gff,"gff", ItemPolicy,"policy");
 	UpdateTarget[string] updateResref;
@@ -634,12 +638,12 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 		if(auto p = ("Var."~name) in itemPolicy)
 			policy = *p;
 
-		if(name[0..11] == "hagbe_iprp_"){
+		if(name.length >= 11 && name[0..11] == "hagbe_iprp_"){
 			switch(name){
-				case "hagbe_iprp_t":  enchIprp.type      = oldItemVar["Value"].to!int32_t; break;
-				case "hagbe_iprp_st": enchIprp.subType   = oldItemVar["Value"].to!int32_t; break;
-				case "hagbe_iprp_c":  enchIprp.costValue = oldItemVar["Value"].to!int32_t; break;
-				case "hagbe_iprp_p1": enchIprp.p1        = oldItemVar["Value"].to!int32_t; break;
+				case "hagbe_iprp_t":  enchIprp.type      = cast(uint16_t)oldItemVar["Value"].as!(GffType.Int); break;
+				case "hagbe_iprp_st": enchIprp.subType   = cast(uint16_t)oldItemVar["Value"].as!(GffType.Int); break;
+				case "hagbe_iprp_c":  enchIprp.costValue = cast(uint16_t)oldItemVar["Value"].as!(GffType.Int); break;
+				case "hagbe_iprp_p1": enchIprp.p1        = cast(uint8_t) oldItemVar["Value"].as!(GffType.Int); break;
 				default: throw new Exception("Unknown hagbe var " ~ name);
 			}
 		}
@@ -688,21 +692,27 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 	//Enchantment
 	int refund = 0;
 	if(enchanted){
-		auto cost = GetLocalInt(updatedItem.as!(GffType.Struct), "hagbe_cost");
-		auto res = EnchantItem(updatedItem.as!(GffType.Struct), enchIprp, cost);
-		if(!res){
-			stderr.writeln("\x1b[1;31mWARNING: ",ownerName,":",updatedItem["Tag"].to!string,": cannot re-enchant with "~enchIprp.toPrettyString~" - Enchantment refunded\x1b[m");
+		if(enchIprp.type == enchIprp.type.max){
+			stderr.writeln("\x1b[1;31mWARNING: ",ownerName,":",updatedItem["Tag"].to!string,": Invalid IPRP\x1b[m");
+			stderr.writeln("\x1b[1;31m         Var table:", updatedItem["VarTable"].toPrettyString, "\x1b[m");
+		}
+		else{
+			auto cost = GetLocalInt(updatedItem.as!(GffType.Struct), "hagbe_cost");
+			auto res = EnchantItem(updatedItem.as!(GffType.Struct), enchIprp, cost);
+			if(!res){
+				stderr.writeln("\x1b[1;31mWARNING: ",ownerName,":",updatedItem["Tag"].to!string,": cannot re-enchant with "~enchIprp.toPrettyString~" - Enchantment refunded\x1b[m");
 
-			//Refund enchantment
-			refund = cost;
+				//Refund enchantment
+				refund = cost;
 
-			//Remove enchantment variables
-			foreach_reverse(i, ref var ; updatedItem["VarTable"].as!(GffType.List)){
-				if(var["Name"].to!string=="DEJA_ENCHANTE" || var["Name"].to!string=="X2_LAST_PROPERTY"){
-					immutable l = updatedItem["VarTable"].as!(GffType.List).length;
-					updatedItem["VarTable"].as!(GffType.List) =
-						updatedItem["VarTable"].as!(GffType.List)[0..i]
-						~ (i+1<l? updatedItem["VarTable"].as!(GffType.List)[i+1..$] : null);
+				//Remove enchantment variables
+				foreach_reverse(i, ref var ; updatedItem["VarTable"].as!(GffType.List)){
+					if(var["Name"].to!string=="DEJA_ENCHANTE" || var["Name"].to!string=="X2_LAST_PROPERTY"){
+						immutable l = updatedItem["VarTable"].as!(GffType.List).length;
+						updatedItem["VarTable"].as!(GffType.List) =
+							updatedItem["VarTable"].as!(GffType.List)[0..i]
+							~ (i+1<l? updatedItem["VarTable"].as!(GffType.List)[i+1..$] : null);
+					}
 				}
 			}
 		}
