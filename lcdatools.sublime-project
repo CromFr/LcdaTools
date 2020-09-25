@@ -1,0 +1,43 @@
+{
+	"folders":
+	[
+		{
+			"path": "."
+		}
+	],
+	"build_systems": [
+		{
+			"name": "LcdaTools",
+			"syntax": "D-dmd.sublime-syntax",
+			"file_regex": "^(?:.*?@)?(?!\\?\\?:\\?)(.*?)(?:-mixin-\\d+)?[:\\(](\\d+)(?:,(\\d+))?\\)?:?\\s(.*)$",
+			"variants":[
+				{
+					"name": "UpgradeHagbeConst",
+					"working_dir": "${project_path}/UpgradeHagbeConst",
+					"shell_cmd": "dub build"
+				},
+				{
+					"name": "ItemUpdater",
+					"working_dir": "${project_path}/ItemUpdater",
+					"shell_cmd": "dub build"
+				},
+				{
+					"name": "MarkHagbeItems",
+					"working_dir": "${project_path}/MarkHagbeItems",
+					"shell_cmd": "dub build"
+				},
+				{
+					"name": "adjust-item-prices",
+					"working_dir": "${project_path}/adjust-item-prices",
+					"shell_cmd": "dub build"
+				},
+				{
+					"name": "BICToUTC",
+					"working_dir": "${project_path}/BICToUTC",
+					"shell_cmd": "dub build"
+				}
+			]
+		}
+
+	]
+}
