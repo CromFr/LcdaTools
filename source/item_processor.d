@@ -56,8 +56,32 @@ auto itemProcessorParseArgs(ref string[] args){
 	return tuple(res, cfg);
 }
 
+struct ItemProcessorContext{
+	import std.variant: VariantN;
 
-int processAllItems(in ItemProcessorConfig cfg, bool delegate(ref GffNode node) processItem){
+	static struct Sql{
+		string table;
+		size_t id;
+		string owner;
+	}
+	static struct Bic{
+		string bicFile;
+		Gff character;
+	}
+
+	VariantN!(Sql.sizeof, Sql, Bic) _value;
+	alias _value this;
+
+	string toString() const{
+		if(auto v = _value.peek!Sql)
+			return format!"%s[%d](owned by %s)"(v.table, v.id, v.owner);
+		else if(auto v = _value.peek!Bic)
+			return v.bicFile.stripExtension;
+		else assert(0);
+	}
+}
+
+int processAllItems(in ItemProcessorConfig cfg, bool delegate(ref GffNode item, in ItemProcessorContext context) processItem){
 
 	//paths
 	immutable vault = cfg.vaultOvr !is null? cfg.vaultOvr : buildPathCI(LcdaConfig["path_nwn2docs"], "servervault");
@@ -122,24 +146,24 @@ int processAllItems(in ItemProcessorConfig cfg, bool delegate(ref GffNode node) 
 			bool charUpdated = false;
 			string[] modifiedResrefs;
 
-			void updateInventory(ref GffNode container){
+			void updateInventory(ref GffNode container, in ItemProcessorContext context){
 				assert("ItemList" in container.as!(GffType.Struct));
 
-				foreach(ref item ; container["ItemList"].as!(GffType.List)){
-					if(processItem(item)){
+				foreach(i, ref item ; container["ItemList"].as!(GffType.List)){
+					if(processItem(item, context)){
 						modifiedResrefs ~= item["TemplateResRef"].to!string;
 						charUpdated = true;
 					}
 
 					if("ItemList" in item.as!(GffType.Struct)){
-						updateInventory(item);
+						updateInventory(item, context);
 					}
 				}
 
 				if("Equip_ItemList" in container.as!(GffType.Struct)){
 					bool[size_t] itemsToRemove;
-					foreach(ref item ; container["Equip_ItemList"].as!(GffType.List)){
-						if(processItem(item)){
+					foreach(i, ref item ; container["Equip_ItemList"].as!(GffType.List)){
+						if(processItem(item, context)){
 							modifiedResrefs ~= item["TemplateResRef"].to!string;
 							charUpdated = true;
 						}
@@ -149,7 +173,10 @@ int processAllItems(in ItemProcessorConfig cfg, bool delegate(ref GffNode node) 
 
 			const oldData = cast(ubyte[])charFile.read;
 			auto character = new Gff(oldData);
-			updateInventory(character);
+
+			ItemProcessorContext context;
+			context._value = ItemProcessorContext.Bic(charPathRelative, character);
+			updateInventory(character, context);
 
 
 			if(charUpdated){
@@ -216,10 +243,12 @@ int processAllItems(in ItemProcessorConfig cfg, bool delegate(ref GffNode node) 
 				auto itemData = row[3].get!(ubyte[]);
 				auto item = new Gff(itemData);
 
-				if(processItem(item)){
+				ItemProcessorContext context;
+				context._value = ItemProcessorContext.Sql(type, id, owner);
+				if(processItem(item, context)){
 					ubyte[] updatedData = item.serialize();
 					if(itemData == updatedData){
-						writeln("\x1b[1;31mWARNING: Item id=", id, " (resref=", item["TemplateResRef"].to!string, ") did not change after update\x1b[m");
+						writefln("\x1b[1;31mWARNING: %s: item did not change after update\x1b[m", context);
 					}
 					else{
 						//Update item data

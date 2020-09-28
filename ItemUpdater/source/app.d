@@ -192,6 +192,7 @@ int main(string[] args){
 
 
 	StopWatch bench;
+	size_t updatedCount;
 	auto taskPool = new TaskPool(parallelJobs-1);
 	scope(exit) taskPool.finish;
 	auto connPool = skipSql? null : new MySQLPool(
@@ -251,7 +252,16 @@ int main(string[] args){
 			uint refund = 0;
 			int[string] updatedItemStats;
 
-			void updateSingleItem(string UpdateMethod)(ref GffNode item, in UpdateTarget target){
+			auto character = new Gff(cast(ubyte[])charFile.read);
+
+			int charLevel;
+			foreach(ref c ; character["ClassList"].as!(GffType.List)){
+				charLevel += c["ClassLevel"].as!(GffType.Short);
+			}
+			auto maxItemValue = nwn.nwscript.resources.getTwoDA("itemvalue").get("MAXSINGLEITEMVALUE", charLevel - 1).to!int - 1;
+
+
+			bool updateSingleItem(string UpdateMethod)(ref GffNode item, in UpdateTarget target){
 				static if(UpdateMethod=="tag")
 					auto identifier = item["Tag"].to!string;
 				else static if(UpdateMethod=="resref")
@@ -269,6 +279,8 @@ int main(string[] args){
 
 				refund += update.refund;
 				item = update.item;
+				updatedCount++;
+				return update.enchanted;
 			}
 
 			void updateInventory(ref GffNode container){
@@ -290,26 +302,32 @@ int main(string[] args){
 				if("Equip_ItemList" in container.as!(GffType.Struct)){
 					bool[size_t] itemsToRemove;
 					foreach(ref item ; container["Equip_ItemList"].as!(GffType.List)){
-
 						bool u = false;
+						bool enchantedBack = false;
 						if(auto target = item["TemplateResRef"].to!string in updateResref){
-							updateSingleItem!"resref"(item, *target);
+							enchantedBack = updateSingleItem!"resref"(item, *target);
 							u=true;
 						}
 						else if(auto target = item["Tag"].to!string in updateTag){
-							updateSingleItem!"tag"(item, *target);
+							enchantedBack = updateSingleItem!"tag"(item, *target);
 							u=true;
 						}
 
 						if(u){
-							if(container["ItemList"].as!(GffType.List).length < 128){
-								itemsToRemove[item.structType] = true;
-								container["ItemList"].as!(GffType.List) ~= item.dup;
-							}
-							else{
-								stderr.writeln(
-									"\x1b[1;31mWARNING: ",charPathRelative," has '",item["Tag"].to!string,"' equipped and no room in inventory to unequip it.",
-									" The character may be refused on login for having an item too powerful for his level.\x1b[m");
+							auto newPrice = item["Cost"].to!long + item["ModifyCost"].to!long;
+							if(newPrice > maxItemValue || enchantedBack){
+								if(container["ItemList"].as!(GffType.List).length < 128){
+									itemsToRemove[item.structType] = true;
+									container["ItemList"].as!(GffType.List) ~= item.dup;
+								}
+								else{
+									stderr.writefln(
+										"\x1b[1;31mWARNING: %s has '%s' equipped and no room in inventory to unequip it."
+										~" The character will be refused on login for having an item too powerful for his level (item price=%d > %d, char level=%d).\x1b[m",
+										charPathRelative, item["TemplateResRef"].to!string,
+										newPrice, maxItemValue, charLevel,
+										);
+								}
 							}
 						}
 					}
@@ -327,7 +345,6 @@ int main(string[] args){
 				}
 			}
 
-			auto character = new Gff(cast(ubyte[])charFile.read);
 			updateInventory(character);
 
 			if(charUpdated){
@@ -400,6 +417,7 @@ int main(string[] args){
 
 				if(target){
 					auto update = item.updateItem(target.gff, target.policy, type~"["~id.to!string~"]", tlkresolv);
+					updatedCount++;
 
 					item.root = update.item;
 					ubyte[] updatedData = item.serialize();
@@ -481,14 +499,14 @@ int main(string[] args){
 	writeln("".center(80, '='));
 	writeln("  INSTALLATION  ".center(80, '|'));
 	writeln("".center(80, '='));
-	writeln("All items have been updated");
+	writefln("All items have been updated (%d)", updatedCount);
 	writeln("- new character files have been put in ", buildPath(temp, "updated_vault"));
 	writeln("- new items in database are pending for SQL commit");
 	writeln();
 
 
 	char ans;
-	if(alwaysAccept==false){
+	if(alwaysAccept==false && dryRun == false){
 		do{
 			write("'y' to apply changes, 'n' to discard them: ");
 			stdout.flush();
@@ -615,7 +633,9 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 
 	//Fix nwn2 oddities
 	updatedItem["ArmorRulesType"] = GffNode(GffType.Int, "ArmorRulesType", blueprint["ArmorRulesType"].as!(GffType.Byte));
-	updatedItem["Cost"].as!(GffType.DWord) = 0;
+	if(updatedItem["Plot"].as!(GffType.Byte) > 0)
+		updatedItem["Cost"].as!(GffType.DWord) = 0;
+
 	foreach(ref prop ; updatedItem["PropertiesList"].as!(GffType.List)){
 		prop.as!(GffType.Struct).remove("Param2");
 		prop.as!(GffType.Struct).remove("Param2Value");
@@ -630,6 +650,8 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 		varsInUpdatedItem[var["Name"].as!(GffType.ExoString)] = i;
 
 	bool enchanted = false;
+	bool enchantedBack = false;
+	int enchantmentCost = false;
 	NWItemproperty enchIprp;
 	foreach(ref oldItemVar ; oldItem["VarTable"].as!(GffType.List)){
 		immutable name = oldItemVar["Name"].to!string;
@@ -638,20 +660,20 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 		if(auto p = ("Var."~name) in itemPolicy)
 			policy = *p;
 
-		if(name.length >= 11 && name[0..11] == "hagbe_iprp_"){
+		if(name.length >= 6 && name[0..6] == "hagbe_"){
+			// Do not copy hagbe variables
+			// They will be added later with EnchantItem
 			switch(name){
+				case "hagbe_ench":    enchanted          = oldItemVar["Value"].to!bool; break;
 				case "hagbe_iprp_t":  enchIprp.type      = cast(uint16_t)oldItemVar["Value"].as!(GffType.Int); break;
 				case "hagbe_iprp_st": enchIprp.subType   = cast(uint16_t)oldItemVar["Value"].as!(GffType.Int); break;
 				case "hagbe_iprp_c":  enchIprp.costValue = cast(uint16_t)oldItemVar["Value"].as!(GffType.Int); break;
 				case "hagbe_iprp_p1": enchIprp.p1        = cast(uint8_t) oldItemVar["Value"].as!(GffType.Int); break;
+				case "hagbe_cost":    enchantmentCost    = oldItemVar["Value"].as!(GffType.Int); break;
 				default: throw new Exception("Unknown hagbe var " ~ name);
 			}
 		}
-
-		if(name=="DEJA_ENCHANTE")
-			enchanted = oldItemVar["Value"].to!bool;
-
-		if(auto idx = name in varsInUpdatedItem){
+		else if(auto idx = name in varsInUpdatedItem){
 			//Var is in updatedItem (inherited from blueprint)
 			//Set var using policy
 			if(policy == UpdatePolicy.Keep){
@@ -692,31 +714,46 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 	//Enchantment
 	int refund = 0;
 	if(enchanted){
+
 		if(enchIprp.type == enchIprp.type.max){
-			stderr.writeln("\x1b[1;31mWARNING: ",ownerName,":",updatedItem["Tag"].to!string,": Invalid IPRP\x1b[m");
-			stderr.writeln("\x1b[1;31m         Var table:", updatedItem["VarTable"].toPrettyString, "\x1b[m");
+			// Invalid enchantment
+			stderr.writefln("\x1b[1;31mWARNING: %s:%s: Invalid IPRP\x1b[m",
+				ownerName, updatedItem["TemplateResRef"].to!string,
+			);
+			stderr.writeln("\x1b[1;31m", updatedItem["VarTable"].toPrettyString, "\x1b[m");
 		}
 		else{
-			auto cost = GetLocalInt(updatedItem.as!(GffType.Struct), "hagbe_cost");
-			auto res = EnchantItem(updatedItem.as!(GffType.Struct), enchIprp, cost);
+			auto res = EnchantItem(updatedItem.as!(GffType.Struct), enchIprp, enchantmentCost);
 			if(!res){
-				stderr.writeln("\x1b[1;31mWARNING: ",ownerName,":",updatedItem["Tag"].to!string,": cannot re-enchant with "~enchIprp.toPrettyString~" - Enchantment refunded\x1b[m");
+				stderr.writeln("\x1b[1;31mWARNING: ",ownerName,":",updatedItem["TemplateResRef"].to!string,": cannot re-enchant with "~enchIprp.toPrettyString~" - Enchantment refunded\x1b[m");
 
 				//Refund enchantment
-				refund = cost;
-
-				//Remove enchantment variables
-				foreach_reverse(i, ref var ; updatedItem["VarTable"].as!(GffType.List)){
-					if(var["Name"].to!string=="DEJA_ENCHANTE" || var["Name"].to!string=="X2_LAST_PROPERTY"){
-						immutable l = updatedItem["VarTable"].as!(GffType.List).length;
-						updatedItem["VarTable"].as!(GffType.List) =
-							updatedItem["VarTable"].as!(GffType.List)[0..i]
-							~ (i+1<l? updatedItem["VarTable"].as!(GffType.List)[i+1..$] : null);
-					}
-				}
+				refund = enchantmentCost;
+			}
+			else{
+				enchantedBack = true;
 			}
 		}
 	}
 
-	return Tuple!(GffNode,"item", int,"refund")(updatedItem, refund);
+	return Tuple!(GffNode,"item", int,"refund", bool,"enchanted")(updatedItem, refund, enchantedBack);
+}
+
+void removeEnchantment(ref GffNode item){
+	//Remove enchantment variables
+
+	item["VarTable"].as!(GffType.List) = item["VarTable"].as!(GffType.List).remove!((ref var){
+		switch(var["Name"].to!string){
+			case "DEJA_ENCHANTE":
+			case "X2_LAST_PROPERTY":
+			case "hagbe_ench":
+			case "hagbe_iprp_t":
+			case "hagbe_iprp_st":
+			case "hagbe_iprp_c":
+			case "hagbe_iprp_p1":
+			case "hagbe_cost":
+				return true;
+			default: return false;
+		}
+	});
 }

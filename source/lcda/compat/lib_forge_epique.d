@@ -380,7 +380,7 @@ NWItemproperty legacyConstToIprp(uint baseItemType, EnchantmentId enchantType){
 		case DAMAGETYPE_ELECTRICAL:
 		case DAMAGETYPE_NEGATIVE:
 		case DAMAGETYPE_POSITIVE:
-		case DAMAGETYPE_DIVINE:                     return NWItemproperty(16, enchantType, 7);//7 is for 1d6
+		case DAMAGETYPE_DIVINE:                     return NWItemproperty(16, cast(ushort)enchantType, 7);//7 is for 1d6
 		case ARMOR_STRENGTH_BONUS2:                 return NWItemproperty(0,  0,           2);
 		case ARMOR_DEXTERITY_BONUS2:                return NWItemproperty(0,  1,           2);
 		case ARMOR_CONSTITUTION_BONUS2:             return NWItemproperty(0,  2,           2);
@@ -429,13 +429,13 @@ NWItemproperty legacyConstToIprp(uint baseItemType, EnchantmentId enchantType){
 		case SHIELD_INTELLIGENCE_BONUS2:            return NWItemproperty(0,  3,           2);
 		case SHIELD_WISDOM_BONUS2:                  return NWItemproperty(0,  4,           2);
 		case SHIELD_CHARISMA_BONUS2:                return NWItemproperty(0,  5,           2);
-		case ARMOR_BONUS_CA2:                       return NWItemproperty(1,  -1,          2);
-		case CLOAK_PARADE_BONUS2:                   return NWItemproperty(1,  -1,          2);
+		case ARMOR_BONUS_CA2:                       return NWItemproperty(1,  0,           2);
+		case CLOAK_PARADE_BONUS2:                   return NWItemproperty(1,  0,           2);
 		case BRACERS_BELT_CA_VS_BLUDGEONING_BONUS5: return NWItemproperty(3,  0,           5);
 		case BRACERS_BELT_CA_VS_PIERCING_BONUS5:    return NWItemproperty(3,  1,           5);
 		case BRACERS_BELT_CA_VS_SLASHING_BONUS5:    return NWItemproperty(3,  2,           5);
-		case ENHANCEMENT_BONUS:                     return NWItemproperty(6,  -1,          1);
-		case ENHANCEMENT_BONUS2:                    return NWItemproperty(6,  -1,          2);
+		case ENHANCEMENT_BONUS:                     return NWItemproperty(6,  0,           1);
+		case ENHANCEMENT_BONUS2:                    return NWItemproperty(6,  0,           2);
 		case HELM_DAMAGERESISTANCE5_BLUDGEONING:    return NWItemproperty(23, 0,           1);
 		case HELM_DAMAGERESISTANCE5_PIERCING:       return NWItemproperty(23, 1,           1);
 		case HELM_DAMAGERESISTANCE5_SLASHING:       return NWItemproperty(23, 2,           1);
@@ -453,19 +453,19 @@ NWItemproperty legacyConstToIprp(uint baseItemType, EnchantmentId enchantType){
 		case RING_IMMUNE_ABSORBTION:                return NWItemproperty(37, 1);
 		case RING_IMMUNE_TERROR:                    return NWItemproperty(37, 5);
 		case RING_IMMUNE_DEATH:                     return NWItemproperty(37, 9);
-		case SPELLRESISTANCE:                       return NWItemproperty(39, -1,          0);//+10
-		case SHIELD_SPELLRESISTANCE10:              return NWItemproperty(39, -1,          0);//+10
+		case SPELLRESISTANCE:                       return NWItemproperty(39, 0,           0);//+10
+		case SHIELD_SPELLRESISTANCE10:              return NWItemproperty(39, 0,           0);//+10
 		case SHIELD_BONUS_VIG_PLUS7:                return NWItemproperty(41, 1,           7);
 		case SHIELD_BONUS_VOL_PLUS7:                return NWItemproperty(41, 2,           7);
 		case SHIELD_BONUS_REF_PLUS7:                return NWItemproperty(41, 3,           7);
 		case KEEN:                                  return NWItemproperty(43);
-		case MIGHTY_5:                              return NWItemproperty(45, -1,          5);
-		case MIGHTY_10:                             return NWItemproperty(45, -1,          10);
-		case MIGHTY_15:                             return NWItemproperty(45, -1,          15);
-		case MIGHTY_20:                             return NWItemproperty(45, -1,          20);
-		case REGENERATION:                          return NWItemproperty(51, -1,          2);
-		case BOOTS_REGENERATION1:                   return NWItemproperty(51, -1,          2);
-		case SHIELD_REGENERATION1:                  return NWItemproperty(51, -1,          2);
+		case MIGHTY_5:                              return NWItemproperty(45, 0,           5);
+		case MIGHTY_10:                             return NWItemproperty(45, 0,           10);
+		case MIGHTY_15:                             return NWItemproperty(45, 0,           15);
+		case MIGHTY_20:                             return NWItemproperty(45, 0,           20);
+		case REGENERATION:                          return NWItemproperty(51, 0,           2);
+		case BOOTS_REGENERATION1:                   return NWItemproperty(51, 0,           2);
+		case SHIELD_REGENERATION1:                  return NWItemproperty(51, 0,           2);
 		case AMULET_SKILL_CONCENTRATION_BONUS15:    return NWItemproperty(52, 1,           15);
 		case AMULET_SKILL_DISABLE_TRAP_BONUS15:     return NWItemproperty(52, 2,           15);
 		case AMULET_SKILL_DISCIPLINE_BONUS15:       return NWItemproperty(52, 3,           15);
@@ -496,10 +496,10 @@ NWItemproperty legacyConstToIprp(uint baseItemType, EnchantmentId enchantType){
 		case AMULET_SKILL_CRAFT_WEAPON_BONUS15:     return NWItemproperty(52, 26,          15);
 		case AMULET_SKILL_CRAFT_ALCHEMY_BONUS15:    return NWItemproperty(52, 27,          15);
 		case AMULET_SKILL_SURVIVAL_BONUS15:         return NWItemproperty(52, 29,          15);
-		case ATTACK_BONUS:                          return NWItemproperty(56, -1,          1);
-		case ATTACK_BONUS2:                         return NWItemproperty(56, -1,          2);
-		case ATTACK_BONUS3:                         return NWItemproperty(56, -1,          3);
-		case ATTACK_BONUS4:                         return NWItemproperty(56, -1,          4);
+		case ATTACK_BONUS:                          return NWItemproperty(56, 0,           1);
+		case ATTACK_BONUS2:                         return NWItemproperty(56, 0,           2);
+		case ATTACK_BONUS3:                         return NWItemproperty(56, 0,           3);
+		case ATTACK_BONUS4:                         return NWItemproperty(56, 0,           4);
 		case UNLIMITED_3:
 			switch(baseItemType){
 				case 8: case 11:                    return NWItemproperty(61, 0,           15);//Bow

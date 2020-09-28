@@ -206,12 +206,15 @@ EnhanceItemPropertyCostValueRet GetItemEnhancedItemProperty(ref GffStruct oItem,
 	NWItemproperty ipExisting = GetSimilarItemProperty(oItem, ipToAdd);
 	if(GetIsItemPropertyValid(ipExisting))
 	{
-		// Replace with similar property with higher cost value
-		ret = EnhanceItemPropertyCostValue(
-			GetBaseItemType(oItem),
-			ipExisting,
-			GetItemPropertyCostTableValue(ipToAdd)
-		);
+		int nCostTable = StringToInt(Get2DAString("itempropdef", "CostTableResRef", GetItemPropertyType(ipExisting)));
+		if(nCostTable > 0){
+			// Replace with similar property with higher cost value
+			ret = EnhanceItemPropertyCostValue(
+				GetBaseItemType(oItem),
+				ipExisting,
+				GetItemPropertyCostTableValue(ipToAdd)
+			);
+		}
 	}
 	else{
 		ret.act = 1;
@@ -306,7 +309,7 @@ int EnchantItem(ref GffStruct oItem, NWItemproperty iprp, int nCost)
 		RemoveItemProperty(oItem, ipToAdd.ip_res);
 	}
 
-	SetLocalInt(oItem, "DEJA_ENCHANTE", TRUE);
+	SetLocalInt(oItem, "hagbe_ench", TRUE);
 	SetLocalInt(oItem, "hagbe_iprp_t", GetItemPropertyType(ipToAdd.ip_diff));
 	SetLocalInt(oItem, "hagbe_iprp_st", GetItemPropertySubType(ipToAdd.ip_diff));
 	SetLocalInt(oItem, "hagbe_iprp_c", GetItemPropertyCostTableValue(ipToAdd.ip_diff));

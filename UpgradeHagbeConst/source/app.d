@@ -29,10 +29,6 @@ int main(string[] args){
 		res.options ~= ipRes[0].options;
 		procCfg = ipRes[1];
 
-		//res.options ~= getopt(args,
-		//	"skip-vault", "Do not update the servervault", &skipVault,
-		//	).options;
-
 		if(res.helpWanted){
 			improvedGetoptPrinter(
 				prgHelp,
@@ -46,49 +42,75 @@ int main(string[] args){
 		return 1;
 	}
 
-
-	return processAllItems(procCfg, (ref item){
+	return processAllItems(procCfg, (ref item, context){
+		bool hasEnchantmentVars = false;
 		bool enchanted = false;
 		int32_t oldConst = int32_t.max;
+
 		foreach(ref var ; item["VarTable"].as!(GffType.List)){
 			switch(var["Name"].to!string){
 				case "DEJA_ENCHANTE":
 					enchanted = var["Value"].to!bool;
+					hasEnchantmentVars = true;
 					break;
 				case "X2_LAST_PROPERTY":
 					oldConst = var["Value"].as!(GffType.Int);
+					hasEnchantmentVars = true;
 					break;
 				default:
 					break;
 			}
 		}
-		if(oldConst <= 0){
-			stderr.writeln("\x1b[1;31mWARNING: Item '", item["TemplateResRef"].to!string, "' has an invalid X2_LAST_PROPERTY value " ~ oldConst.to!string ~ "\x1b[m");
-			return false;
-		}
 
-		if(enchanted && oldConst != int32_t.max){
-			auto ench = oldConst.to!EnchantmentId;
-
+		if(hasEnchantmentVars){
 			GffNode[] newVarTable;
+
+			// Remove old vars
 			foreach(ref var ; item["VarTable"].as!(GffType.List)){
 				switch(var["Name"].to!string){
 					case "X2_LAST_PROPERTY":
+					case "DEJA_ENCHANTE":
 						break;
 					default:
 						newVarTable ~= var;
 				}
 			}
 
-			auto iprp = legacyConstToIprp(GetBaseItemType(item), ench);
-			newVarTable ~= LocalVar("hagbe_iprp_t", GffType.Int, iprp.type);
-			newVarTable ~= LocalVar("hagbe_iprp_st", GffType.Int, iprp.subType);
-			newVarTable ~= LocalVar("hagbe_iprp_c", GffType.Int, iprp.costValue);
-			newVarTable ~= LocalVar("hagbe_iprp_p1", GffType.Int, iprp.p1);
-			newVarTable ~= LocalVar("hagbe_cost", GffType.Int, PrixDuService(ench));
+			// Add new vars (if correctly enchanted)
+			if(!enchanted){
+				if(oldConst != int32_t.max){
+					stderr.writefln("\x1b[1;31mWARNING: %s: Item '%s' is not enchanted but has a X2_LAST_PROPERTY=%d.\x1b[m",
+						context, item["TemplateResRef"].to!string, oldConst, enchanted
+					);
+					stderr.writeln(item["VarTable"].toPrettyString);
+				}
+			}
+			else if(oldConst <= 0){
+				stderr.writefln("\x1b[1;31mWARNING: %s: Item '%s' is enchanted with an invalid X2_LAST_PROPERTY=%d. Enchantement will be removed.\x1b[m",
+					context, item["TemplateResRef"].to!string, oldConst
+				);
+				stderr.writeln(item["VarTable"].toPrettyString);
+			}
+			else if(oldConst == int32_t.max){
+				stderr.writefln("\x1b[1;31mWARNING: %s: Item '%s' is enchanted but has no X2_LAST_PROPERTY value. Enchantement will be removed.\x1b[m",
+					context, item["TemplateResRef"].to!string
+				);
+				stderr.writeln(item["VarTable"].toPrettyString);
+			}
+			else{
+				auto ench = oldConst.to!EnchantmentId;
+
+				auto iprp = legacyConstToIprp(GetBaseItemType(item), ench);
+				newVarTable ~= LocalVar("hagbe_ench", GffType.Int, 1);
+				newVarTable ~= LocalVar("hagbe_iprp_t", GffType.Int, iprp.type);
+				newVarTable ~= LocalVar("hagbe_iprp_st", GffType.Int, iprp.subType);
+				newVarTable ~= LocalVar("hagbe_iprp_c", GffType.Int, iprp.costValue);
+				newVarTable ~= LocalVar("hagbe_iprp_p1", GffType.Int, iprp.p1);
+				newVarTable ~= LocalVar("hagbe_cost", GffType.Int, PrixDuService(ench));
+			}
 
 			item["VarTable"].as!(GffType.List) = newVarTable;
-
+			//stderr.writefln("        %s: enchanted=%s, oldConst=%s", item["TemplateResRef"].to!string, enchanted, oldConst);
 			return true;
 		}
 		return false;

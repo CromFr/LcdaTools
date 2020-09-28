@@ -1,12 +1,14 @@
 module lcda.compat._type_conversion;
 
 import std.string;
+import std.stdint;
+import std.conv;
 
 import nwn.nwscript;
 import lcda.compat._misc;
 
-NWItemproperty BuildItemProperty(NWInt nType, NWInt nSubType = -1, NWInt nCostValue = -1, NWInt nParam1 = -1){
-	return NWItemproperty(nType, nSubType, nCostValue, nParam1);
+NWItemproperty BuildItemProperty(NWInt nType, NWInt nSubType = 0, NWInt nCostValue = 0, NWInt nParam1 = 0){
+	return NWItemproperty(nType.to!uint16_t, cast(uint16_t)nSubType, cast(uint16_t)nCostValue, cast(uint8_t)nParam1);
 }
 
 // iprp_immuncost.2da
