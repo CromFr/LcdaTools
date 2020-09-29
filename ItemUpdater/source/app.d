@@ -173,7 +173,7 @@ int main(string[] args){
 			updateTag[bpu.from] = UpdateTarget(gff, bpu.policy);
 		}
 		else{
-			immutable tag = gff["Tag"].as!(GffType.ResRef);
+			immutable tag = gff["Tag"].as!(GffType.ExoString);
 			if(tag in updateTag){
 				stderr.writeln("\x1b[1;31mERROR: Tag '"~tag~"' already registered. Cannot add blueprint '"~bpu.blueprint~".uti'\x1b[m");
 				errored = true;
