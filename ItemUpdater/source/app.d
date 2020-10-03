@@ -261,7 +261,7 @@ int main(string[] args){
 			auto maxItemValue = nwn.nwscript.resources.getTwoDA("itemvalue").get("MAXSINGLEITEMVALUE", charLevel - 1).to!int - 1;
 
 
-			bool updateSingleItem(string UpdateMethod)(ref GffNode item, in UpdateTarget target){
+			void updateSingleItem(string UpdateMethod)(ref GffNode item, in UpdateTarget target){
 				static if(UpdateMethod=="tag")
 					auto identifier = item["Tag"].to!string;
 				else static if(UpdateMethod=="resref")
@@ -280,7 +280,6 @@ int main(string[] args){
 				refund += update.refund;
 				item = update.item;
 				updatedCount++;
-				return update.enchanted;
 			}
 
 			void updateInventory(ref GffNode container){
@@ -303,19 +302,18 @@ int main(string[] args){
 					bool[size_t] itemsToRemove;
 					foreach(ref item ; container["Equip_ItemList"].as!(GffType.List)){
 						bool u = false;
-						bool enchantedBack = false;
 						if(auto target = item["TemplateResRef"].to!string in updateResref){
-							enchantedBack = updateSingleItem!"resref"(item, *target);
+							updateSingleItem!"resref"(item, *target);
 							u=true;
 						}
 						else if(auto target = item["Tag"].to!string in updateTag){
-							enchantedBack = updateSingleItem!"tag"(item, *target);
+							updateSingleItem!"tag"(item, *target);
 							u=true;
 						}
 
 						if(u){
 							auto newPrice = item["Cost"].to!long + item["ModifyCost"].to!long;
-							if(newPrice > maxItemValue || enchantedBack){
+							if(newPrice > maxItemValue){
 								if(container["ItemList"].as!(GffType.List).length < 128){
 									itemsToRemove[item.structType] = true;
 									container["ItemList"].as!(GffType.List) ~= item.dup;
@@ -650,7 +648,6 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 		varsInUpdatedItem[var["Name"].as!(GffType.ExoString)] = i;
 
 	bool enchanted = false;
-	bool enchantedBack = false;
 	int enchantmentCost = false;
 	NWItemproperty enchIprp;
 	foreach(ref oldItemVar ; oldItem["VarTable"].as!(GffType.List)){
@@ -731,12 +728,15 @@ auto updateItem(in GffNode oldItem, in GffNode blueprint, in ItemPolicy itemPoli
 				refund = enchantmentCost;
 			}
 			else{
-				enchantedBack = true;
+				if(updatedItem["Plot"].as!(GffType.Byte) != 0){
+					import nwn.nwscript.extensions: calcItemCost;
+					updatedItem["Cost"].as!(GffType.DWord) = calcItemCost(updatedItem.as!(GffType.Struct));
+				}
 			}
 		}
 	}
 
-	return Tuple!(GffNode,"item", int,"refund", bool,"enchanted")(updatedItem, refund, enchantedBack);
+	return Tuple!(GffNode,"item", int,"refund")(updatedItem, refund);
 }
 
 void removeEnchantment(ref GffNode item){
