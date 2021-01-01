@@ -286,6 +286,7 @@ int main(string[] args){
 				assert("ItemList" in container.as!(GffType.Struct));
 
 				foreach(ref item ; container["ItemList"].as!(GffType.List)){
+					enforce("TemplateResRef" in item, format!"No resref for item in %s:\n%s"(charPathRelative, item.toPrettyString));
 					if(auto target = item["TemplateResRef"].to!string in updateResref){
 						updateSingleItem!"resref"(item, *target);
 					}
@@ -302,6 +303,7 @@ int main(string[] args){
 					bool[size_t] itemsToRemove;
 					foreach(ref item ; container["Equip_ItemList"].as!(GffType.List)){
 						bool u = false;
+						enforce("TemplateResRef" in item, format!"No resref for item in %s:\n%s"(charPathRelative, item.toPrettyString));
 						if(auto target = item["TemplateResRef"].to!string in updateResref){
 							updateSingleItem!"resref"(item, *target);
 							u=true;
