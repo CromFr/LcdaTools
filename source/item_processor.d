@@ -81,7 +81,7 @@ struct ItemProcessorContext{
 	}
 }
 
-int processAllItems(in ItemProcessorConfig cfg, bool delegate(ref GffNode item, in ItemProcessorContext context) processItem){
+int processAllItems(in ItemProcessorConfig cfg, bool delegate(ref GffStruct item, in ItemProcessorContext context) processItem){
 
 	//paths
 	immutable vault = cfg.vaultOvr !is null? cfg.vaultOvr : buildPathCI(LcdaConfig["path_nwn2docs"], "servervault");
@@ -146,23 +146,23 @@ int processAllItems(in ItemProcessorConfig cfg, bool delegate(ref GffNode item, 
 			bool charUpdated = false;
 			string[] modifiedResrefs;
 
-			void updateInventory(ref GffNode container, in ItemProcessorContext context){
-				assert("ItemList" in container.as!(GffType.Struct));
+			void updateInventory(ref GffStruct container, in ItemProcessorContext context){
+				enforce("ItemList" in container);
 
-				foreach(i, ref item ; container["ItemList"].as!(GffType.List)){
+				foreach(i, ref item ; container["ItemList"].get!GffList){
 					if(processItem(item, context)){
 						modifiedResrefs ~= item["TemplateResRef"].to!string;
 						charUpdated = true;
 					}
 
-					if("ItemList" in item.as!(GffType.Struct)){
+					if("ItemList" in item){
 						updateInventory(item, context);
 					}
 				}
 
-				if("Equip_ItemList" in container.as!(GffType.Struct)){
+				if("Equip_ItemList" in container){
 					bool[size_t] itemsToRemove;
-					foreach(i, ref item ; container["Equip_ItemList"].as!(GffType.List)){
+					foreach(i, ref item ; container["Equip_ItemList"].get!GffList){
 						if(processItem(item, context)){
 							modifiedResrefs ~= item["TemplateResRef"].to!string;
 							charUpdated = true;

@@ -1,15 +1,15 @@
 {
 	"fileVersion": 1,
 	"versions": {
-		"eventcore": "0.8.50",
+		"eventcore": "0.9.11",
 		"gfm": "7.0.8",
 		"libasync": "0.8.6",
 		"memutils": "1.0.4",
 		"mysql-native": "3.0.0",
-		"nwn-lib-d": "0.0.5+commit.38.gee67751",
+		"nwn-lib-d": "0.0.9",
 		"stdx-allocator": "2.77.5",
-		"taggedalgebraic": "0.11.13",
+		"taggedalgebraic": "0.11.18",
 		"unit-threaded": "0.7.55",
-		"vibe-core": "1.9.1"
+		"vibe-core": "1.11.3"
 	}
 }
