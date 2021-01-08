@@ -607,7 +607,7 @@ auto updateItem(in GffStruct oldItem, in GffStruct blueprint, in ItemPolicy item
 	copyPropertyIfPresent(oldItem, updatedItem, "EffectList");
 	if("LastName" in oldItem){
 		if("LastName" !in updatedItem)
-			updatedItem["LastName"].get!GffLocString = "";
+			updatedItem["LastName"] = GffLocString(0, [0:""]);
 	}
 	copyPropertyIfPresent(oldItem, updatedItem, "XOrientation");
 	copyPropertyIfPresent(oldItem, updatedItem, "XPosition");
@@ -638,8 +638,10 @@ auto updateItem(in GffStruct oldItem, in GffStruct blueprint, in ItemPolicy item
 		updatedItem["Cost"].get!GffDWord = 0;
 
 	foreach(ref prop ; updatedItem["PropertiesList"].get!GffList){
-		prop.remove("Param2");
-		prop.remove("Param2Value");
+		if("Param2" in prop)
+			prop.remove("Param2");
+		if("Param2Value" in prop)
+			prop.remove("Param2Value");
 		prop["UsesPerDay"] = GffByte(255);
 		prop["Useable"] = GffByte(1);
 	}
