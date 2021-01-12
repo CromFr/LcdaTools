@@ -1,0 +1,8 @@
+name "tipeee-fetch-tips"
+description "Fetch tipper list and store them in a MySQL database"
+authors "Crom"
+copyright "Copyright © 2021, Crom"
+license "GPLv3"
+dependency "vibe-d" version="~>0.9.2"
+dependency "htmld" version="~>0.3.7"
+dependency "mysql-native" version="~>3.0.0"

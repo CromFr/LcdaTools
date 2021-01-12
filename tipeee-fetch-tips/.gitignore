@@ -1,0 +1,15 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/tipeee-fetch-tippers
+tipeee-fetch-tippers.so
+tipeee-fetch-tippers.dylib
+tipeee-fetch-tippers.dll
+tipeee-fetch-tippers.a
+tipeee-fetch-tippers.lib
+tipeee-fetch-tippers-test-*
+*.exe
+*.o
+*.obj
+*.lst
