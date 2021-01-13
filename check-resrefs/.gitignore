@@ -1,0 +1,15 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/check-resrefs
+check-resrefs.so
+check-resrefs.dylib
+check-resrefs.dll
+check-resrefs.a
+check-resrefs.lib
+check-resrefs-test-*
+*.exe
+*.o
+*.obj
+*.lst
