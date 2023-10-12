@@ -45,6 +45,7 @@ int main(string[] args){
 	bool skipVault = false;
 	bool skipSql = false;
 	bool dryRun = false;
+	bool continueOnError = false;
 
 	alias BlueprintUpdateDef = Tuple!(string,"from", string,"blueprint", UpdatePolicy[string],"policy");
 	BlueprintUpdateDef[] resrefupdateDef;
@@ -100,6 +101,7 @@ int main(string[] args){
 			"skip-vault", "Do not update the servervault", &skipVault,
 			"skip-sql", "Do not update the items in the SQL db (coffreibee, casieribee)", &skipSql,
 			"dry-run", "Do not write any file or execute any SQL write commands", &dryRun,
+			"continue", "Ignore errors and continue processing", &continueOnError,
 			"y|y", "Do not prompt and accept everything", &alwaysAccept,
 			"j|j", "Number of parallel jobs\nDefault: 1", &parallelJobs,
 			).options;
@@ -248,132 +250,142 @@ int main(string[] args){
 		foreach(charFile ; taskPool.parallel(vault.dirEntries("*.bic", SpanMode.depth))){
 			immutable charPathRelative = charFile.relativePath(vault);
 
-			bool charUpdated = false;
-			uint refund = 0;
-			int[string] updatedItemStats;
+			try {
+				bool charUpdated = false;
+				uint refund = 0;
+				int[string] updatedItemStats;
 
-			auto character = new Gff(cast(ubyte[])charFile.read);
+				auto character = new Gff(cast(ubyte[])charFile.read);
 
-			int charLevel;
-			foreach(ref c ; character["ClassList"].get!GffList){
-				charLevel += c["ClassLevel"].get!GffShort;
-			}
-			auto maxItemValue = nwn.nwscript.resources.getTwoDA("itemvalue").get("MAXSINGLEITEMVALUE", charLevel - 1).to!int - 1;
-
-
-			void updateSingleItem(string UpdateMethod)(ref GffStruct item, in UpdateTarget target){
-				static if(UpdateMethod=="tag")
-					auto identifier = item["Tag"].to!string;
-				else static if(UpdateMethod=="resref")
-					auto identifier = item["TemplateResRef"].to!string;
-				else static assert(0);
+				int charLevel;
+				foreach(ref c ; character["ClassList"].get!GffList){
+					charLevel += c["ClassLevel"].get!GffShort;
+				}
+				auto maxItemValue = nwn.nwscript.resources.getTwoDA("itemvalue").get("MAXSINGLEITEMVALUE", charLevel - 1).to!int - 1;
 
 
-				if(auto cnt = identifier in updatedItemStats)
-					(*cnt)++;
-				else
-					updatedItemStats[identifier] = 1;
+				void updateSingleItem(string UpdateMethod)(ref GffStruct item, in UpdateTarget target){
+					static if(UpdateMethod=="tag")
+						auto identifier = item["Tag"].to!string;
+					else static if(UpdateMethod=="resref")
+						auto identifier = item["TemplateResRef"].to!string;
+					else static assert(0);
 
-				charUpdated = true;
-				auto update = item.updateItem(target.gff, target.policy, charFile.relativePath(vault), tlkresolv);
 
-				refund += update.refund;
-				item = update.item;
-				updatedCount++;
-			}
+					if(auto cnt = identifier in updatedItemStats)
+						(*cnt)++;
+					else
+						updatedItemStats[identifier] = 1;
 
-			void updateInventory(ref GffStruct container){
-				assert("ItemList" in container);
+					charUpdated = true;
+					auto update = item.updateItem(target.gff, target.policy, charFile.relativePath(vault), tlkresolv);
 
-				foreach(ref item ; container["ItemList"].get!GffList){
-					enforce("TemplateResRef" in item, format!"No resref for item in %s:\n%s"(charPathRelative, item.toPrettyString));
-					if(auto target = item["TemplateResRef"].to!string in updateResref){
-						updateSingleItem!"resref"(item, *target);
-					}
-					else if(auto target = item["Tag"].to!string in updateTag){
-						updateSingleItem!"tag"(item, *target);
-					}
-
-					if("ItemList" in item){
-						updateInventory(item);
-					}
+					refund += update.refund;
+					item = update.item;
+					updatedCount++;
 				}
 
-				if("Equip_ItemList" in container){
-					bool[size_t] itemsToRemove;
-					foreach(ref item ; container["Equip_ItemList"].get!GffList){
-						bool u = false;
+				void updateInventory(ref GffStruct container){
+					enforce("ItemList" in container);
+
+					foreach(ref item ; container["ItemList"].get!GffList){
 						enforce("TemplateResRef" in item, format!"No resref for item in %s:\n%s"(charPathRelative, item.toPrettyString));
 						if(auto target = item["TemplateResRef"].to!string in updateResref){
 							updateSingleItem!"resref"(item, *target);
-							u=true;
 						}
 						else if(auto target = item["Tag"].to!string in updateTag){
 							updateSingleItem!"tag"(item, *target);
-							u=true;
 						}
 
-						if(u){
-							auto newPrice = item["Cost"].to!long + item["ModifyCost"].to!long;
-							if(newPrice > maxItemValue){
-								if(container["ItemList"].get!GffList.length < 128){
-									itemsToRemove[item.id] = true;
-									container["ItemList"].get!GffList ~= item.dup;
-								}
-								else{
-									stderr.writefln(
-										"\x1b[1;31mWARNING: %s has '%s' equipped and no room in inventory to unequip it."
-										~" The character will be refused on login for having an item too powerful for his level (item price=%d > %d, char level=%d).\x1b[m",
-										charPathRelative, item["TemplateResRef"].to!string,
-										newPrice, maxItemValue, charLevel,
-										);
+						if("ItemList" in item){
+							updateInventory(item);
+						}
+					}
+
+					if("Equip_ItemList" in container){
+						bool[size_t] itemsToRemove;
+						foreach(ref item ; container["Equip_ItemList"].get!GffList){
+							bool u = false;
+							enforce("TemplateResRef" in item, format!"No resref for item in %s:\n%s"(charPathRelative, item.toPrettyString));
+							if(auto target = item["TemplateResRef"].to!string in updateResref){
+								updateSingleItem!"resref"(item, *target);
+								u=true;
+							}
+							else if(auto target = item["Tag"].to!string in updateTag){
+								updateSingleItem!"tag"(item, *target);
+								u=true;
+							}
+
+							if(u){
+								auto newPrice = item["Cost"].to!long + item["ModifyCost"].to!long;
+								if(newPrice > maxItemValue){
+									if(container["ItemList"].get!GffList.length < 128){
+										itemsToRemove[item.id] = true;
+										container["ItemList"].get!GffList ~= item.dup;
+									}
+									else{
+										stderr.writefln(
+											"\x1b[1;31mWARNING: %s has '%s' equipped and no room in inventory to unequip it."
+											~" The character will be refused on login for having an item too powerful for his level (item price=%d > %d, char level=%d).\x1b[m",
+											charPathRelative, item["TemplateResRef"].to!string,
+											newPrice, maxItemValue, charLevel,
+											);
+									}
 								}
 							}
 						}
-					}
 
-					//container["Equip_ItemList"].get!GffList.remove!(a=>(a.id in itemsToRemove) !is null);
+						//container["Equip_ItemList"].get!GffList.remove!(a=>(a.id in itemsToRemove) !is null);
 
-					foreach_reverse(i, ref item ; container["Equip_ItemList"].get!GffList){
-						if(item.id in itemsToRemove){
-							immutable l = container["Equip_ItemList"].get!GffList.length;
-							container["Equip_ItemList"].get!GffList =
-								container["Equip_ItemList"].get!GffList[0..i]
-								~ (i+1<l? container["Equip_ItemList"].get!GffList[i+1..$] : null);
+						foreach_reverse(i, ref item ; container["Equip_ItemList"].get!GffList){
+							if(item.id in itemsToRemove){
+								immutable l = container["Equip_ItemList"].get!GffList.length;
+								container["Equip_ItemList"].get!GffList =
+									container["Equip_ItemList"].get!GffList[0..i]
+									~ (i+1<l? container["Equip_ItemList"].get!GffList[i+1..$] : null);
+							}
 						}
 					}
 				}
-			}
 
-			updateInventory(character);
+				updateInventory(character);
 
-			if(charUpdated){
-				//Apply refund
-				character["Gold"].get!GffDWord += refund;
+				if(charUpdated){
+					//Apply refund
+					character["Gold"].get!GffDWord += refund;
 
-				//copy backup
-				auto backupFile = buildPath(temp, "backup_vault", charPathRelative);
-				if(!buildNormalizedPath(backupFile, "..").exists)
-					buildNormalizedPath(backupFile, "..").mkdirRecurse;
-				charFile.copy(backupFile);
+					//copy backup
+					auto backupFile = buildPath(temp, "backup_vault", charPathRelative);
+					if(!buildNormalizedPath(backupFile, "..").exists)
+						buildNormalizedPath(backupFile, "..").mkdirRecurse;
+					charFile.copy(backupFile);
 
-				//serialize current
-				auto serializedChar = character.serialize;
-				if(dryRun == false){
-					auto tmpFile = buildPath(temp, "updated_vault", charPathRelative);
-					if(!buildNormalizedPath(tmpFile, "..").exists)
-						buildNormalizedPath(tmpFile, "..").mkdirRecurse;
-					tmpFile.writeFile(serializedChar);
+					//serialize current
+					auto serializedChar = character.serialize;
+					if(dryRun == false){
+						auto tmpFile = buildPath(temp, "updated_vault", charPathRelative);
+						if(!buildNormalizedPath(tmpFile, "..").exists)
+							buildNormalizedPath(tmpFile, "..").mkdirRecurse;
+						tmpFile.writeFile(serializedChar);
+					}
+
+					//message
+					write(charPathRelative.leftJustify(35));
+					foreach(k,v ; updatedItemStats)
+						write(" ",k,"(x",v,")");
+					if(refund>0)
+						write(" + Refund of ",refund,"gp");
+					writeln();
+					stdout.flush();
 				}
-
-				//message
-				write(charPathRelative.leftJustify(35));
-				foreach(k,v ; updatedItemStats)
-					write(" ",k,"(x",v,")");
-				if(refund>0)
-					write(" + Refund of ",refund,"gp");
-				writeln();
-				stdout.flush();
+			}
+			catch(Throwable t){
+				writeln("Error while processing character ", charPathRelative);
+				if(continueOnError){
+					writeln(t);
+				} else {
+					throw t;
+				}
 			}
 
 		}
@@ -410,75 +422,84 @@ int main(string[] args){
 				auto itemName = row[1].get!string;
 				auto owner = row[2].get!string;
 				auto itemData = row[3].get!(ubyte[]);
-				auto item = new Gff(itemData);
 
-				auto target = item["TemplateResRef"].to!string in updateResref;
-				if(!target) target = item["Tag"].to!string in updateTag;
+				try{
+					auto item = new Gff(itemData);
 
-				if(target){
-					auto update = item.updateItem(target.gff, target.policy, type~"["~id.to!string~"]", tlkresolv);
-					updatedCount++;
+					auto target = item["TemplateResRef"].to!string in updateResref;
+					if(!target) target = item["Tag"].to!string in updateTag;
 
-					item.root = update.item;
-					ubyte[] updatedData = item.serialize();
+					if(target){
+						auto update = item.updateItem(target.gff, target.policy, type~"["~id.to!string~"]", tlkresolv);
+						updatedCount++;
 
-					if(itemData == updatedData){
-						writeln("\x1b[1;31mWARNING: Item id=", id, " (resref=", target.gff["TemplateResRef"].to!string, ") did not change after update\x1b[m");
+						item.root = update.item;
+						ubyte[] updatedData = item.serialize();
+
+						if(itemData == updatedData){
+							writeln("\x1b[1;31mWARNING: Item id=", id, " (resref=", target.gff["TemplateResRef"].to!string, ") did not change after update\x1b[m");
+						}
+						else if(dryRun == false){
+							bool firstUpdate = itemName.indexOf("<b><c=red>MAJ</c></b>") == -1;
+
+							auto conn = connPool.lockConnection();
+
+							//Update item data
+							static if(type == "coffreibee"){
+								//Item will be updated and name will be changed
+								auto affectedRows = conn.exec(
+									"UPDATE coffreibee SET"
+										~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
+										~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
+										~" item_data=?"
+									~" WHERE id=?",
+									updatedData, id,
+								);
+							}
+							else static if(type == "casieribee"){
+								//Item will be updated and marked as forbidden to sell (do not appear in list) and can be retrieved by the owner
+								auto affectedRows = conn.exec(
+									"UPDATE casieribee SET"
+										~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
+										~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
+										~" sale_allowed=0,"
+										~" item_data=?"
+									~" WHERE id=?",
+									updatedData, id,
+								);
+							}
+							else static assert(0);
+
+							enforce(affectedRows==1, "Wrong number of rows affected by SQL query: "~affectedRows.to!string~" rows affected for item ID="~id.to!string);
+
+							if(update.refund > 0){
+								//Apply refund in bank
+								affectedRows = conn.exec(
+									"UPDATE account SET ibee_bank=(ibee_bank+?) WHERE name=?",
+									update.refund, owner,
+								);
+								enforce(affectedRows==1, "Wrong number of rows affected by SQL query");
+							}
+
+							static if(type == "coffreibee")
+								buildPath(coffreIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
+							else static if(type == "casieribee")
+								buildPath(casierIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
+							else static assert(0);
+						}
+
+						writeln(type~"[",id,"] ",update.item["Tag"].to!string," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
+						stdout.flush();
 					}
-					else if(dryRun == false){
-						bool firstUpdate = itemName.indexOf("<b><c=red>MAJ</c></b>") == -1;
-
-						auto conn = connPool.lockConnection();
-
-						//Update item data
-						static if(type == "coffreibee"){
-							//Item will be updated and name will be changed
-							auto affectedRows = conn.exec(
-								"UPDATE coffreibee SET"
-									~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
-									~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
-									~" item_data=?"
-								~" WHERE id=?",
-								updatedData, id,
-							);
-						}
-						else static if(type == "casieribee"){
-							//Item will be updated and marked as forbidden to sell (do not appear in list) and can be retrieved by the owner
-							auto affectedRows = conn.exec(
-								"UPDATE casieribee SET"
-									~ (firstUpdate? " item_name=CONCAT('<b><c=red>MAJ</c></b> ',item_name)," : null)
-									~ (firstUpdate? " item_description=CONCAT('<b><c=red>Cet objet a été mis à jour et ne correspond plus à la description.\\nVeuillez retirer et re-déposer l\\'objet pour le mettre à jour\\n\\n</c></b>',item_description)," : null)
-									~" sale_allowed=0,"
-									~" item_data=?"
-								~" WHERE id=?",
-								updatedData, id,
-							);
-						}
-						else static assert(0);
-
-						enforce(affectedRows==1, "Wrong number of rows affected by SQL query: "~affectedRows.to!string~" rows affected for item ID="~id.to!string);
-
-						if(update.refund > 0){
-							//Apply refund in bank
-							affectedRows = conn.exec(
-								"UPDATE account SET ibee_bank=(ibee_bank+?) WHERE name=?",
-								update.refund, owner,
-							);
-							enforce(affectedRows==1, "Wrong number of rows affected by SQL query");
-						}
-
-						static if(type == "coffreibee")
-							buildPath(coffreIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
-						else static if(type == "casieribee")
-							buildPath(casierIbeeBackup, id.to!string~".item.gff").writeFile(itemData);
-						else static assert(0);
-					}
-
-					writeln(type~"[",id,"] ",update.item["Tag"].to!string," (Owner: ",owner,")", update.refund>0? " + refund "~update.refund.to!string~" gp sent in bank" : "");
-					stdout.flush();
 				}
-
-
+				catch(Throwable t){
+					writeln("Error while processing item ID=", id, " Name=", itemName);
+					if(continueOnError){
+						writeln(t);
+					} else {
+						throw t;
+					}
+				}
 			}
 		}
 
